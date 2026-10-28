@@ -173,10 +173,6 @@ const spi_nand_info_t *spi_nand_init(void)
     spi_nand_set_feature(SPI_NAND_REG_PROTECTION, reg & (uint8_t)~(SPI_NAND_PROT_BP_MASK | SPI_NAND_PROT_INV | SPI_NAND_PROT_CMP));
 
     reg = spi_nand_get_feature(SPI_NAND_REG_FEATURE) & SPI_NAND_FEAT_RW_MASK;
-    if(nand_info->cont_read) {
-        /* NR survives an MCU reset (only power cycle clears it): always start in Normal Read */
-        reg |= SPI_NAND_FEAT_NR;
-    }
     spi_nand_set_feature(SPI_NAND_REG_FEATURE, reg | SPI_NAND_FEAT_QE | SPI_NAND_FEAT_ECC_EN);
 
     return nand_info;

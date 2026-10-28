@@ -7,16 +7,16 @@ ErrStatus spi_nand_set_continuous_read(uint8_t enable)
     const spi_nand_info_t *nand = spi_nand_get_info();
     uint8_t reg;
 
+    /* only parts with the Continuous Read register layout have NR in B0h bit3 (BPL on standard parts) */
     if((NULL == nand) || !nand->cont_read) {
         return ERROR;
     }
 
-    /* B0h.NR: 0 = Continuous Read, 1 = Normal Read */
     reg = spi_nand_get_feature(SPI_NAND_REG_FEATURE) & SPI_NAND_FEAT_RW_MASK;
-    reg = enable ? (uint8_t)(reg & ~SPI_NAND_FEAT_NR) : (uint8_t)(reg | SPI_NAND_FEAT_NR);
+    reg = enable ? (uint8_t)(reg & ~SPI_NAND_CR_FEAT_NR) : (uint8_t)(reg | SPI_NAND_CR_FEAT_NR);
     spi_nand_set_feature(SPI_NAND_REG_FEATURE, reg);
 
-    return ((spi_nand_get_feature(SPI_NAND_REG_FEATURE) & SPI_NAND_FEAT_NR) == (reg & SPI_NAND_FEAT_NR)) ? SUCCESS : ERROR;
+    return ((spi_nand_get_feature(SPI_NAND_REG_FEATURE) & SPI_NAND_CR_FEAT_NR) == (reg & SPI_NAND_CR_FEAT_NR)) ? SUCCESS : ERROR;
 }
 
 /* column bytes are don't-care in Continuous Read: output starts at byte 0 and runs on while CS stays low */

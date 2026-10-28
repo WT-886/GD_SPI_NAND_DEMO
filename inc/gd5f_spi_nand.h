@@ -27,40 +27,43 @@
 /* status reads waiting for OIP=0 before an operation is reported as failed */
 #define SPI_NAND_BUSY_TIMEOUT       20000U
 
-/* ---------------- feature registers (GD5F1GM9 datasheet Table 6-1) ---------------- */
-#define SPI_NAND_REG_PROTECTION     0xA0U
-#define SPI_NAND_REG_FEATURE        0xB0U
-#define SPI_NAND_REG_STATUS         0xC0U
-#define SPI_NAND_REG_DRIVE          0xD0U
-#define SPI_NAND_REG_STATUS2        0xF0U
+/* ---------------- feature registers: bits common to all GD5F parts ---------------- */
+#define SPI_NAND_REG_PROTECTION     0xA0U           /* block protection (R/W) */
+#define SPI_NAND_REG_FEATURE        0xB0U           /* feature / configuration (R/W) */
+#define SPI_NAND_REG_STATUS         0xC0U           /* status (read only, WEL set by 06h) */
+#define SPI_NAND_REG_DRIVE          0xD0U           /* output driver strength (R/W) */
+#define SPI_NAND_REG_STATUS2        0xF0U           /* extended status (read only) */
 
 /* A0h */
-#define SPI_NAND_PROT_BRWD          BIT(7)
-#define SPI_NAND_PROT_BP_MASK       (BIT(5) | BIT(4) | BIT(3))
-#define SPI_NAND_PROT_INV           BIT(2)
-#define SPI_NAND_PROT_CMP           BIT(1)
-#define SPI_NAND_PROT_RW_MASK       0xBEU           /* reserved bits must be written as 0 */
-/* B0h */
-#define SPI_NAND_FEAT_OTP_PRT       BIT(7)
-#define SPI_NAND_FEAT_OTP_EN        BIT(6)
-#define SPI_NAND_FEAT_ECC_EN        BIT(4)
-#define SPI_NAND_FEAT_NR            BIT(3)
-#define SPI_NAND_FEAT_QE            BIT(0)
-#define SPI_NAND_FEAT_RW_MASK       0xD9U
+#define SPI_NAND_PROT_BRWD          BIT(7)          /* block register write disable: A0h locked while WP# is low */
+#define SPI_NAND_PROT_BP_MASK       (BIT(5) | BIT(4) | BIT(3))  /* BP2..BP0: size of the protected area */
+#define SPI_NAND_PROT_INV           BIT(2)          /* protect from the bottom instead of the top */
+#define SPI_NAND_PROT_CMP           BIT(1)          /* complement: protect the other part of the array */
+#define SPI_NAND_PROT_RW_MASK       0xBEU           /* writable bits; reserved bits must be written as 0 */
+/* B0h (bit3 differs by family: BPL on standard parts, NR on Continuous Read parts) */
+#define SPI_NAND_FEAT_OTP_PRT       BIT(7)          /* lock the OTP area permanently (non-volatile) */
+#define SPI_NAND_FEAT_OTP_EN        BIT(6)          /* access the OTP area instead of the main array */
+#define SPI_NAND_FEAT_ECC_EN        BIT(4)          /* on-chip ECC enable */
+#define SPI_NAND_FEAT_QE            BIT(0)          /* quad enable: allows x4 commands, IO2/IO3 lose WP#/HOLD# */
+#define SPI_NAND_FEAT_RW_MASK       0xD9U           /* writable bits; reserved bits must be written as 0 */
 /* C0h */
-#define SPI_NAND_STAT_BBLS          BIT(6)
-#define SPI_NAND_STAT_ECCS_MASK     (BIT(5) | BIT(4))
-#define SPI_NAND_STAT_ECCS_UNCORR   BIT(5)          /* ECCS[1:0] = 10b */
-#define SPI_NAND_STAT_P_FAIL        BIT(3)
-#define SPI_NAND_STAT_E_FAIL        BIT(2)
-#define SPI_NAND_STAT_WEL           BIT(1)
-#define SPI_NAND_STAT_OIP           BIT(0)
+#define SPI_NAND_STAT_ECCS_MASK     (BIT(5) | BIT(4))  /* ECC result of the last page read */
+#define SPI_NAND_STAT_ECCS_UNCORR   BIT(5)          /* ECCS[1:0] = 10b: uncorrectable error */
+#define SPI_NAND_STAT_P_FAIL        BIT(3)          /* last program failed */
+#define SPI_NAND_STAT_E_FAIL        BIT(2)          /* last erase failed */
+#define SPI_NAND_STAT_WEL           BIT(1)          /* write enable latch */
+#define SPI_NAND_STAT_OIP           BIT(0)          /* operation in progress (busy) */
 /* D0h */
 #define SPI_NAND_DRV_DS_SHIFT       5U
-#define SPI_NAND_DRV_DS_MASK        (BIT(6) | BIT(5))
-#define SPI_NAND_DRV_DLP_EN         BIT(3)
-#define SPI_NAND_DRV_DC             BIT(2)
-#define SPI_NAND_DRV_RW_MASK        0x6CU
+#define SPI_NAND_DRV_DS_MASK        (BIT(6) | BIT(5))  /* DS_S1/DS_S0: output driver strength */
+/* F0h */
+#define SPI_NAND_STAT2_ECCSE_MASK   (BIT(5) | BIT(4))  /* extended ECC status, refines ECCS */
+#define SPI_NAND_STAT2_BPS          BIT(3)          /* BPS, see datasheet register table */
+
+/* ---------------- standard parts (e.g. GD5F1GQ4), see datasheet Features Settings table ---------------- */
+#define SPI_NAND_STD_FEAT_BPL       BIT(3)          /* B0h: block protection lock */
+#define SPI_NAND_STD_DRV_RW_MASK    0x60U           /* D0h writable bits: DS_S1/DS_S0 only */
+/* Continuous Read parts (e.g. GD5F1GM9) use a different B0h/C0h/D0h/F0h layout: see gd5f_spi_nand_cr.h */
 
 /* device geometry, looked up by ID at init */
 typedef struct {
@@ -74,7 +77,7 @@ typedef struct {
     uint8_t     row_addr_bytes;     /* page address bytes for 13h/10h/D8h */
     uint8_t     col_addr_bytes;     /* column address bytes for 03h/3Bh/6Bh/02h/32h */
     uint8_t     read_dummy_clocks;  /* dummy clocks after column address in 03h/3Bh/6Bh */
-    uint8_t     cont_read;          /* 1: supports Continuous Read (B0h.NR = 0) */
+    uint8_t     cont_read;          /* 1: Continuous Read register layout (B0h bit3 = NR), see gd5f_spi_nand_cr.h */
 } spi_nand_info_t;
 
 /* init SPI + GPIO, reset device, unlock blocks, enable QE; unknown IDs get a default 1Gb geometry */

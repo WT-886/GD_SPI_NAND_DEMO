@@ -299,6 +299,8 @@ int main(void)
 
     cycle_counter_init();
     nand = spi_nand_init();
+    /* Continuous Read parts: start in Normal Read (no-op on standard parts) */
+    (void)spi_nand_set_continuous_read(0U);
     printf("\r\nSPI NAND: %s (ID 0x%04X), page %u+%u B, %u pages/block, %u blocks\r\n",
            nand->name, spi_nand_read_id(), nand->page_size, nand->spare_size,
            nand->pages_per_block, nand->block_count);
