@@ -1,0 +1,6 @@
+{
+  "cmake.cmakePath": "cmake",
+  "cmake.configureOnOpen": true,
+  "cmake.useVsDeveloperEnvironment": "never",
+  "debug.allowBreakpointsEverywhere": true
+}

@@ -1,0 +1,41 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "GD32 DevSuite (GD-Link)",
+      "type": "gd32-debug",
+      "request": "launch",
+      "executable": "${workspaceFolder}/build/Debug/my-gd32-project.elf",
+      "device": "GD32F450ZKT6",
+      "probe": "gdlink",
+      "port": 5099,
+      "gdbPath": "E:/feishu_cache/arm-gnu-toolchain-15.2.rel1-mingw-w64-x86_64-arm-none-eabi/bin/arm-none-eabi-gdb.exe",
+      "gdbServerPath": "",
+      "runToMain": true
+    },
+    {
+      "name": "GD32 Debug (OpenOCD)",
+      "type": "cortex-debug",
+      "request": "launch",
+      "servertype": "openocd",
+      "cwd": "${workspaceFolder}",
+      "executable": "${workspaceFolder}/build/Debug/my-gd32-project.elf",
+      "serverpath": "E:/Browser_download/openocd-cb0c224-i686-w64-mingw32/bin/openocd.exe",
+      "gdbPath": "E:/feishu_cache/arm-gnu-toolchain-15.2.rel1-mingw-w64-x86_64-arm-none-eabi/bin/arm-none-eabi-gdb.exe",
+      "configFiles": ["${workspaceFolder}/openocd_gdlink/openocd_gdlink.cfg"],
+      "runToEntryPoint": "main",
+      "preLaunchTask": "CMake: build"
+    },
+    {
+      "name": "GD32 Attach (OpenOCD)",
+      "type": "cortex-debug",
+      "request": "attach",
+      "servertype": "openocd",
+      "cwd": "${workspaceFolder}",
+      "executable": "${workspaceFolder}/build/Debug/my-gd32-project.elf",
+      "serverpath": "E:/Browser_download/openocd-cb0c224-i686-w64-mingw32/bin/openocd.exe",
+      "gdbPath": "E:/feishu_cache/arm-gnu-toolchain-15.2.rel1-mingw-w64-x86_64-arm-none-eabi/bin/arm-none-eabi-gdb.exe",
+      "configFiles": ["${workspaceFolder}/openocd_gdlink/openocd_gdlink.cfg"]
+    }
+  ]
+}

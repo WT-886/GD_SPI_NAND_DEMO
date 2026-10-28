@@ -1,0 +1,13 @@
+# build output
+build/
+*.o
+*.obj
+*.elf
+*.hex
+*.bin
+*.map
+*.lst
+
+# local tool state
+.cache/
+compile_commands.json
