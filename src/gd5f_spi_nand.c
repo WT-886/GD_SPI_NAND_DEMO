@@ -223,6 +223,22 @@ ErrStatus spi_nand_block_erase(uint32_t block)
     return (wait_ready() & (SPI_NAND_STAT_OIP | SPI_NAND_STAT_E_FAIL)) ? ERROR : SUCCESS;
 }
 
+ErrStatus spi_nand_erase_blocks(uint32_t first_block, uint32_t block_count)
+{
+    if((NULL == nand_info) || (0U == block_count) ||
+       (first_block >= nand_info->block_count) ||
+       (block_count > (uint32_t)nand_info->block_count - first_block)) {
+        return ERROR;
+    }
+
+    for(uint32_t block = first_block; block < first_block + block_count; block++) {
+        if(ERROR == spi_nand_block_erase(block)) {
+            return ERROR;
+        }
+    }
+    return SUCCESS;
+}
+
 static ErrStatus page_program(uint32_t page, uint16_t column, const uint8_t *buf, uint16_t len, uint8_t quad)
 {
     write_enable();
@@ -330,4 +346,94 @@ ErrStatus spi_nand_dual_page_read(uint32_t page, uint16_t column, uint8_t *buf, 
 ErrStatus spi_nand_quad_page_read(uint32_t page, uint16_t column, uint8_t *buf, uint16_t len)
 {
     return spi_nand_read_lines(page, column, buf, len, 4U);
+}
+
+static ErrStatus page_program_mode(uint32_t page, uint16_t column, const uint8_t *buf, uint16_t len,
+                                   spi_nand_io_mode_t mode)
+{
+    if(SPI_NAND_IO_SINGLE == mode) {
+        return spi_nand_page_program(page, column, buf, len);
+    }
+    if(SPI_NAND_IO_QUAD == mode) {
+        return spi_nand_quad_page_program(page, column, buf, len);
+    }
+    return ERROR;
+}
+
+static ErrStatus page_read_mode(uint32_t page, uint16_t column, uint8_t *buf, uint16_t len,
+                                spi_nand_io_mode_t mode)
+{
+    if(SPI_NAND_IO_SINGLE == mode) {
+        return spi_nand_page_read(page, column, buf, len);
+    }
+    if(SPI_NAND_IO_DUAL == mode) {
+        return spi_nand_dual_page_read(page, column, buf, len);
+    }
+    if(SPI_NAND_IO_QUAD == mode) {
+        return spi_nand_quad_page_read(page, column, buf, len);
+    }
+    return ERROR;
+}
+
+static ErrStatus validate_data_range(uint32_t address, uint32_t len)
+{
+    uint32_t capacity;
+
+    if(NULL == nand_info) {
+        return ERROR;
+    }
+    capacity = (uint32_t)nand_info->block_count * nand_info->pages_per_block * nand_info->page_size;
+    return ((address <= capacity) && (len <= capacity - address)) ? SUCCESS : ERROR;
+}
+
+ErrStatus spi_nand_program_data(uint32_t address, const uint8_t *buf, uint32_t len, spi_nand_io_mode_t mode)
+{
+    if((NULL == buf) || (ERROR == validate_data_range(address, len)) ||
+       ((SPI_NAND_IO_SINGLE != mode) && (SPI_NAND_IO_QUAD != mode))) {
+        return ERROR;
+    }
+
+    while(len > 0U) {
+        const uint32_t page_size = nand_info->page_size;
+        const uint32_t page = address / page_size;
+        const uint16_t column = (uint16_t)(address % page_size);
+        uint32_t chunk = page_size - column;
+
+        if(chunk > len) {
+            chunk = len;
+        }
+        if(ERROR == page_program_mode(page, column, buf, (uint16_t)chunk, mode)) {
+            return ERROR;
+        }
+        address += chunk;
+        buf += chunk;
+        len -= chunk;
+    }
+    return SUCCESS;
+}
+
+ErrStatus spi_nand_read_data(uint32_t address, uint8_t *buf, uint32_t len, spi_nand_io_mode_t mode)
+{
+    if((NULL == buf) || (ERROR == validate_data_range(address, len)) ||
+       ((SPI_NAND_IO_SINGLE != mode) && (SPI_NAND_IO_DUAL != mode) && (SPI_NAND_IO_QUAD != mode))) {
+        return ERROR;
+    }
+
+    while(len > 0U) {
+        const uint32_t page_size = nand_info->page_size;
+        const uint32_t page = address / page_size;
+        const uint16_t column = (uint16_t)(address % page_size);
+        uint32_t chunk = page_size - column;
+
+        if(chunk > len) {
+            chunk = len;
+        }
+        if(ERROR == page_read_mode(page, column, buf, (uint16_t)chunk, mode)) {
+            return ERROR;
+        }
+        address += chunk;
+        buf += chunk;
+        len -= chunk;
+    }
+    return SUCCESS;
 }

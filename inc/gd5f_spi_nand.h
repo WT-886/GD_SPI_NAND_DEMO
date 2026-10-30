@@ -80,6 +80,12 @@ typedef struct {
     uint8_t     cont_read;          /* 1: Continuous Read register layout (B0h bit3 = NR), see gd5f_spi_nand_cr.h */
 } spi_nand_info_t;
 
+typedef enum {
+    SPI_NAND_IO_SINGLE = 1U,
+    SPI_NAND_IO_DUAL   = 2U,
+    SPI_NAND_IO_QUAD   = 4U
+} spi_nand_io_mode_t;
+
 /* init SPI + GPIO, reset device, unlock blocks, enable QE; unknown IDs get a default 1Gb geometry */
 const spi_nand_info_t *spi_nand_init(void);
 const spi_nand_info_t *spi_nand_get_info(void);
@@ -91,6 +97,8 @@ void spi_nand_set_feature(uint8_t reg, uint8_t value);
 
 /* page = absolute page index (block * pages_per_block + page_in_block) */
 ErrStatus spi_nand_block_erase(uint32_t block);
+/* erase whole physical blocks; all data in each selected block is destroyed */
+ErrStatus spi_nand_erase_blocks(uint32_t first_block, uint32_t block_count);
 ErrStatus spi_nand_page_program(uint32_t page, uint16_t column, const uint8_t *buf, uint16_t len);
 ErrStatus spi_nand_quad_page_program(uint32_t page, uint16_t column, const uint8_t *buf, uint16_t len);
 /* return ERROR when ECC reports an uncorrectable error */
@@ -98,5 +106,11 @@ ErrStatus spi_nand_page_read(uint32_t page, uint16_t column, uint8_t *buf, uint1
 /* dual output read from cache (3Bh), sampled through the SPI5 quad receiver */
 ErrStatus spi_nand_dual_page_read(uint32_t page, uint16_t column, uint8_t *buf, uint16_t len);
 ErrStatus spi_nand_quad_page_read(uint32_t page, uint16_t column, uint8_t *buf, uint16_t len);
+
+/* address is a physical byte offset in the main area (OOB excluded); ranges split at page boundaries */
+/* caller must erase first and handle bad blocks; partial-page program limits are device-specific */
+ErrStatus spi_nand_program_data(uint32_t address, const uint8_t *buf, uint32_t len, spi_nand_io_mode_t mode);
+/* reads raw physical pages; bad blocks are not skipped or remapped */
+ErrStatus spi_nand_read_data(uint32_t address, uint8_t *buf, uint32_t len, spi_nand_io_mode_t mode);
 
 #endif /* GD5F_SPI_NAND_H */

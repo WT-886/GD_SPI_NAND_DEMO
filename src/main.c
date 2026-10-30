@@ -33,279 +33,151 @@ OF SUCH DAMAGE.
 */
 
 #include "gd32f4xx.h"
-#include "systick.h"
 #include <stdio.h>
 #include <string.h>
-#include "main.h"
 #include "gd32f450i_eval.h"
 #include "gd5f_spi_nand.h"
 #include "gd5f_spi_nand_cr.h"
 
-/* block used by the demo; block 0 is avoided as it often stores boot data */
-#define NAND_TEST_BLOCK       1U
-/* RAM used by the Continuous Read demo; one CS-low burst fills it */
-#define CR_BUFFER_SIZE        (64U * 1024U)
+/* Test pages in one reserved block. Erasing this block destroys all its data. */
+#define NAND_TEST_BLOCK          1U
+#define NAND_TEST_PAGE           0U
+#define NAND_TEST_PAGE_COUNT     2U
 
-typedef ErrStatus (*nand_program_fn)(uint32_t page, uint16_t column, const uint8_t *buf, uint16_t len);
-typedef ErrStatus (*nand_read_fn)(uint32_t page, uint16_t column, uint8_t *buf, uint16_t len);
-typedef ErrStatus (*nand_stream_fn)(uint32_t start_page, uint8_t *buf, uint32_t len);
+#define CR_BUFFER_SIZE           (64U * 1024U)
 
-static uint8_t tx_buffer[SPI_NAND_MAX_PAGE_SIZE];
-static uint8_t rx_buffer[SPI_NAND_MAX_PAGE_SIZE];
+static uint8_t tx_page[SPI_NAND_MAX_PAGE_SIZE];
+static uint8_t rx_page[SPI_NAND_MAX_PAGE_SIZE];
 static uint8_t cr_buffer[CR_BUFFER_SIZE];
 
-static void cycle_counter_init(void)
+static void fill_test_page(uint8_t *buf, uint16_t size, uint32_t page)
 {
-    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
-    DWT->CYCCNT = 0U;
-    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
-}
-
-static uint32_t to_kbps(uint32_t bytes, uint32_t cycles)
-{
-    return (0U == cycles) ? 0U : (uint32_t)(((uint64_t)bytes * SystemCoreClock) / ((uint64_t)cycles * 1024U));
-}
-
-/* pseudo-random content derived from the page index, so any page can be verified without keeping a copy */
-static void fill_page(uint8_t *buf, uint16_t size, uint32_t page)
-{
-    uint16_t lfsr = (uint16_t)(0xACE1U ^ (page * 0x9E37U));
-
-    if(0U == lfsr) {
-        lfsr = 1U;
-    }
     for(uint32_t i = 0U; i < size; i++) {
-        lfsr = (uint16_t)((lfsr >> 1) ^ ((lfsr & 1U) ? 0xB400U : 0U));
-        buf[i] = (uint8_t)lfsr;
+        buf[i] = (uint8_t)(i + page);
     }
 }
 
-/*!
-    \brief    erase the test block and program every page of it
-    \param[in]  nand: device info
-    \param[in]  program: single or quad page program function
-    \param[out] cycles: CPU cycles spent in program calls (erase excluded)
-    \retval     ErrStatus
-*/
-static ErrStatus program_block(const spi_nand_info_t *nand, nand_program_fn program, uint32_t *cycles)
+static ErrStatus write_pages(const spi_nand_info_t *nand, uint32_t first_page,
+                             uint32_t page_count, spi_nand_io_mode_t mode)
 {
-    const uint32_t first = NAND_TEST_BLOCK * nand->pages_per_block;
+    for(uint32_t i = 0U; i < page_count; i++) {
+        const uint32_t page = first_page + i;
 
-    *cycles = 0U;
-    if(ERROR == spi_nand_block_erase(NAND_TEST_BLOCK)) {
+        fill_test_page(tx_page, nand->page_size, page);
+        if(ERROR == spi_nand_program_data(page * nand->page_size, tx_page, nand->page_size, mode)) {
+            return ERROR;
+        }
+    }
+    return SUCCESS;
+}
+
+static ErrStatus verify_pages(const spi_nand_info_t *nand, uint32_t first_page,
+                              uint32_t page_count, spi_nand_io_mode_t mode)
+{
+    for(uint32_t i = 0U; i < page_count; i++) {
+        const uint32_t page = first_page + i;
+
+        if(ERROR == spi_nand_read_data(page * nand->page_size, rx_page, nand->page_size, mode)) {
+            return ERROR;
+        }
+        fill_test_page(tx_page, nand->page_size, page);
+        if(0 != memcmp(tx_page, rx_page, nand->page_size)) {
+            return ERROR;
+        }
+    }
+    return SUCCESS;
+}
+
+static ErrStatus verify_continuous(const spi_nand_info_t *nand, uint32_t first_page, uint32_t page_count,
+                                   ErrStatus (*read_stream)(uint32_t, uint8_t *, uint32_t))
+{
+    const uint32_t bytes = page_count * nand->page_size;
+
+    if((bytes > sizeof(cr_buffer)) ||
+       (ERROR == read_stream(first_page, cr_buffer, bytes))) {
         return ERROR;
     }
-    for(uint32_t p = 0U; p < nand->pages_per_block; p++) {
-        uint32_t t;
-        ErrStatus st;
-
-        fill_page(tx_buffer, nand->page_size, first + p);
-        t = DWT->CYCCNT;
-        st = program(first + p, 0U, tx_buffer, nand->page_size);
-        *cycles += DWT->CYCCNT - t;
-        if(ERROR == st) {
+    for(uint32_t i = 0U; i < page_count; i++) {
+        fill_test_page(tx_page, nand->page_size, first_page + i);
+        if(0 != memcmp(tx_page, &cr_buffer[i * nand->page_size], nand->page_size)) {
             return ERROR;
         }
     }
     return SUCCESS;
 }
 
-/*!
-    \brief    read back every page of the test block and verify it
-    \param[in]  nand: device info
-    \param[in]  read: single, dual or quad page read function
-    \param[out] cycles: CPU cycles spent in read calls
-    \retval     ErrStatus
-*/
-static ErrStatus verify_block(const spi_nand_info_t *nand, nand_read_fn read, uint32_t *cycles)
+static void print_result(const char *name, ErrStatus result)
 {
-    const uint32_t first = NAND_TEST_BLOCK * nand->pages_per_block;
+    printf("%-28s %s\r\n", name, (SUCCESS == result) ? "PASS" : "FAIL");
+}
 
-    *cycles = 0U;
-    for(uint32_t p = 0U; p < nand->pages_per_block; p++) {
-        uint32_t t;
-        ErrStatus st;
+static void nand_demo(const spi_nand_info_t *nand)
+{
+    const uint32_t first_page = NAND_TEST_BLOCK * nand->pages_per_block + NAND_TEST_PAGE;
+    const uint32_t page_count = NAND_TEST_PAGE_COUNT;
+    ErrStatus result;
 
-        t = DWT->CYCCNT;
-        st = read(first + p, 0U, rx_buffer, nand->page_size);
-        *cycles += DWT->CYCCNT - t;
-        fill_page(tx_buffer, nand->page_size, first + p);
-        if((ERROR == st) || (0 != memcmp(tx_buffer, rx_buffer, nand->page_size))) {
-            return ERROR;
-        }
+    if((NAND_TEST_BLOCK >= nand->block_count) ||
+       (NAND_TEST_PAGE >= nand->pages_per_block) ||
+       (0U == page_count) ||
+       (page_count > nand->pages_per_block - NAND_TEST_PAGE) ||
+       ((page_count * nand->page_size) > sizeof(cr_buffer))) {
+        printf("Invalid test block/page range\r\n");
+        return;
     }
-    return SUCCESS;
-}
 
-static void print_row(const char *mode, ErrStatus ok, uint32_t bytes, uint32_t prog_cycles, uint32_t read_cycles)
-{
-    char prog[12] = "-";
+    printf("\r\nTest: block %u, page %u, %lu page(s)\r\n",
+           NAND_TEST_BLOCK, NAND_TEST_PAGE, (unsigned long)page_count);
 
-    if(0U != prog_cycles) {
-        snprintf(prog, sizeof(prog), "%lu", (unsigned long)to_kbps(bytes, prog_cycles));
+    result = spi_nand_block_erase(NAND_TEST_BLOCK);
+    print_result("block erase", result);
+    if(ERROR == result) {
+        return;
     }
-    printf("%-18s %10s %10lu   %s\r\n", mode, prog, (unsigned long)to_kbps(bytes, read_cycles),
-           (SUCCESS == ok) ? "PASS" : "FAIL");
-}
 
-/* compare cr_buffer against the expected content of consecutive pages */
-static ErrStatus check_cr_buffer(const spi_nand_info_t *nand, uint32_t first, uint32_t pages)
-{
-    for(uint32_t p = 0U; p < pages; p++) {
-        fill_page(tx_buffer, nand->page_size, first + p);
-        if(0 != memcmp(tx_buffer, &cr_buffer[p * nand->page_size], nand->page_size)) {
-            return ERROR;
-        }
+    result = write_pages(nand, first_page, page_count, SPI_NAND_IO_SINGLE);
+    print_result("single write", result);
+    if(ERROR == result) {
+        return;
     }
-    return SUCCESS;
-}
+    print_result("single read / verify", verify_pages(nand, first_page, page_count, SPI_NAND_IO_SINGLE));
+    print_result("quad read / verify", verify_pages(nand, first_page, page_count, SPI_NAND_IO_QUAD));
 
-static void print_cr_row(const char *lines, const char *mode, uint32_t cycles, uint32_t bytes, ErrStatus ok)
-{
-    printf("%-7s %-11s %9lu %9lu   %s\r\n", lines, mode,
-           (unsigned long)(cycles / (SystemCoreClock / 1000000U)), (unsigned long)to_kbps(bytes, cycles),
-           (SUCCESS == ok) ? "PASS" : "FAIL");
-}
+    result = spi_nand_block_erase(NAND_TEST_BLOCK);
+    print_result("block erase before quad write", result);
+    if(ERROR == result) {
+        return;
+    }
+    result = write_pages(nand, first_page, page_count, SPI_NAND_IO_QUAD);
+    print_result("quad write", result);
+    if(ERROR == result) {
+        return;
+    }
+    print_result("quad-write / single-read verify", verify_pages(nand, first_page, page_count, SPI_NAND_IO_SINGLE));
+    print_result("quad-write / quad-read verify", verify_pages(nand, first_page, page_count, SPI_NAND_IO_QUAD));
 
-/*!
-    \brief    Continuous Read demo (e.g. GD5F1GM9): read the same pages with Normal Read (13h + read
-              from cache per page) and with Continuous Read (one 13h, one CS-low stream), in single
-              and quad mode; verify the data and compare the time
-    \param[in]  nand: device info
-    \param[out] none
-    \retval     none
-*/
-static void continuous_read_demo(const spi_nand_info_t *nand)
-{
-    static const struct {
-        const char *lines;
-        nand_read_fn page_read;
-        nand_stream_fn stream;
-    } modes[] = {
-        { "single", spi_nand_page_read,      spi_nand_continuous_read },
-        { "quad",   spi_nand_quad_page_read, spi_nand_quad_continuous_read },
-    };
-    const uint32_t first = NAND_TEST_BLOCK * nand->pages_per_block;
-    uint32_t pages = CR_BUFFER_SIZE / nand->page_size;
-    uint32_t bytes, cycles, t;
-    ErrStatus st;
-
-    printf("\r\n===== Continuous Read demo =====\r\n");
     if(ERROR == spi_nand_set_continuous_read(1U)) {
-        printf("%s does not support Continuous Read, skipped\r\n", nand->name);
+        printf("Continuous Read: unsupported, skipped\r\n");
         return;
     }
-    /* program in Normal Read mode */
+    print_result("single Continuous Read", verify_continuous(nand, first_page, page_count,
+                 spi_nand_continuous_read));
+    print_result("quad Continuous Read", verify_continuous(nand, first_page, page_count,
+                 spi_nand_quad_continuous_read));
     (void)spi_nand_set_continuous_read(0U);
-
-    /* Continuous Read cannot skip bad blocks, so keep the region inside the test block */
-    if(pages > nand->pages_per_block) {
-        pages = nand->pages_per_block;
-    }
-    bytes = pages * nand->page_size;
-    if(ERROR == program_block(nand, spi_nand_quad_page_program, &cycles)) {
-        printf("program test block FAIL\r\n");
-        return;
-    }
-
-    printf("Region: block %u, %lu pages, %lu KB\r\n\r\n", NAND_TEST_BLOCK,
-           (unsigned long)pages, (unsigned long)(bytes / 1024U));
-    printf("%-7s %-11s %9s %9s   %s\r\n", "lines", "mode", "time us", "KB/s", "verify");
-
-    for(uint32_t m = 0U; m < sizeof(modes) / sizeof(modes[0]); m++) {
-        uint32_t normal_cycles;
-
-        /* Normal Read: one 13h + read from cache per page */
-        memset(cr_buffer, 0, bytes);
-        st = SUCCESS;
-        t = DWT->CYCCNT;
-        for(uint32_t p = 0U; (p < pages) && (SUCCESS == st); p++) {
-            st = modes[m].page_read(first + p, 0U, &cr_buffer[p * nand->page_size], nand->page_size);
-        }
-        normal_cycles = DWT->CYCCNT - t;
-        print_cr_row(modes[m].lines, "normal", normal_cycles, bytes,
-                     (SUCCESS == st) ? check_cr_buffer(nand, first, pages) : ERROR);
-
-        /* Continuous Read: one 13h, then a single stream across all pages */
-        memset(cr_buffer, 0, bytes);
-        cycles = 0U;
-        st = spi_nand_set_continuous_read(1U);
-        if(SUCCESS == st) {
-            t = DWT->CYCCNT;
-            st = modes[m].stream(first, cr_buffer, bytes);
-            cycles = DWT->CYCCNT - t;
-        }
-        (void)spi_nand_set_continuous_read(0U);
-        print_cr_row(modes[m].lines, "continuous", cycles, bytes,
-                     (SUCCESS == st) ? check_cr_buffer(nand, first, pages) : ERROR);
-
-        if(0U != cycles) {
-            const uint32_t x100 = (uint32_t)((uint64_t)normal_cycles * 100U / cycles);
-            printf("%-7s speed-up %lu.%02lux\r\n\r\n", "", (unsigned long)(x100 / 100U), (unsigned long)(x100 % 100U));
-        }
-    }
 }
 
-/*!
-    \brief    QSPI demo: program one block in single / quad mode, read it back in single / dual / quad
-              mode, verify and report throughput
-    \param[in]  nand: device info
-    \param[out] none
-    \retval     none
-*/
-static void qspi_flash_demo(const spi_nand_info_t *nand)
-{
-    uint32_t bytes, sck_khz, prog_cycles, read_cycles;
-    ErrStatus ok, prog_ok;
-
-    bytes = (uint32_t)nand->page_size * nand->pages_per_block;
-    sck_khz = rcu_clock_freq_get(CK_APB2) / (2U << ((SPI_CTL0(SPI_NAND_SPI) & SPI_CTL0_PSC) >> 3)) / 1000U;
-
-    printf("\r\n===== Nand QSPI demo =====\r\n");
-    printf("Test area: block %u, %lu KB, SCK %lu kHz\r\n\r\n",
-           NAND_TEST_BLOCK, (unsigned long)(bytes / 1024U), (unsigned long)sck_khz);
-    printf("%-18s %10s %10s   %s\r\n", "mode", "prog KB/s", "read KB/s", "verify");
-
-    /* single-line program + single-line read */
-    read_cycles = 0U;
-    ok = program_block(nand, spi_nand_page_program, &prog_cycles);
-    if(SUCCESS == ok) {
-        ok = verify_block(nand, spi_nand_page_read, &read_cycles);
-    }
-    print_row("single (1-1-1)", ok, bytes, prog_cycles, read_cycles);
-
-    /* quad program, then read the same data back with dual and quad output */
-    read_cycles = 0U;
-    prog_ok = program_block(nand, spi_nand_quad_page_program, &prog_cycles);
-    ok = (SUCCESS == prog_ok) ? verify_block(nand, spi_nand_dual_page_read, &read_cycles) : ERROR;
-    print_row("dual read (1-1-2)", ok, bytes, 0U, read_cycles);
-    read_cycles = 0U;
-    ok = (SUCCESS == prog_ok) ? verify_block(nand, spi_nand_quad_page_read, &read_cycles) : ERROR;
-    print_row("quad (1-1-4)", ok, bytes, prog_cycles, read_cycles);
-}
-
-/*!
-    \brief    main function
-    \param[in]  none
-    \param[out] none
-    \retval     none
-*/
 int main(void)
 {
     const spi_nand_info_t *nand;
 
     gd_eval_com_init(EVAL_COM0);
-    systick_config();
-
-    cycle_counter_init();
     nand = spi_nand_init();
-    /* Continuous Read parts: start in Normal Read (no-op on standard parts) */
     (void)spi_nand_set_continuous_read(0U);
-    printf("\r\nSPI NAND: %s (ID 0x%04X), page %u+%u B, %u pages/block, %u blocks\r\n",
-           nand->name, spi_nand_read_id(), nand->page_size, nand->spare_size,
-           nand->pages_per_block, nand->block_count);
-    qspi_flash_demo(nand);
-    continuous_read_demo(nand);
+
+    printf("\r\nSPI NAND: %s, ID 0x%04X, page %u+%u B\r\n",
+           nand->name, spi_nand_read_id(), nand->page_size, nand->spare_size);
+    nand_demo(nand);
 
     while(1) {
     }
