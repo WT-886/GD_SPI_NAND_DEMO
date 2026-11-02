@@ -129,6 +129,13 @@ static void nand_demo(const spi_nand_info_t *nand)
     printf("\r\nTest: block %u, page %u, %lu page(s)\r\n",
            NAND_TEST_BLOCK, NAND_TEST_PAGE, (unsigned long)page_count);
 
+    result = spi_nand_block_check_bad(NAND_TEST_BLOCK);
+    print_result("block bad-block check", result);
+    if(ERROR == result) {
+        printf("Skipping read/write test for this block\r\n");
+        return;
+    }
+
     result = spi_nand_block_erase(NAND_TEST_BLOCK);
     print_result("block erase", result);
     if(ERROR == result) {

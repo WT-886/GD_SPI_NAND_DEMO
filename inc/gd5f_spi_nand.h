@@ -78,6 +78,9 @@ typedef struct {
     uint8_t     col_addr_bytes;     /* column address bytes for 03h/3Bh/6Bh/02h/32h */
     uint8_t     read_dummy_clocks;  /* dummy clocks after column address in 03h/3Bh/6Bh */
     uint8_t     cont_read;          /* 1: Continuous Read register layout (B0h bit3 = NR), see gd5f_spi_nand_cr.h */
+    uint8_t     bad_block_marker_page;  /* first in-block page checked for factory bad-block marker */
+    uint8_t     bad_block_marker_count; /* number of consecutive marker pages */
+    uint16_t    bad_block_marker_offset;/* byte offset in spare area; marker value other than FFh means bad */
 } spi_nand_info_t;
 
 typedef enum {
@@ -99,6 +102,8 @@ void spi_nand_set_feature(uint8_t reg, uint8_t value);
 ErrStatus spi_nand_block_erase(uint32_t block);
 /* erase whole physical blocks; all data in each selected block is destroyed */
 ErrStatus spi_nand_erase_blocks(uint32_t first_block, uint32_t block_count);
+/* SUCCESS: block is good; ERROR: bad marker found or marker read/configuration failed */
+ErrStatus spi_nand_block_check_bad(uint32_t block);
 ErrStatus spi_nand_page_program(uint32_t page, uint16_t column, const uint8_t *buf, uint16_t len);
 ErrStatus spi_nand_quad_page_program(uint32_t page, uint16_t column, const uint8_t *buf, uint16_t len);
 /* return ERROR when ECC reports an uncorrectable error */

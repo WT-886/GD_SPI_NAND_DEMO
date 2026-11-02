@@ -26,14 +26,14 @@
 
 /* add new parts here */
 static const spi_nand_info_t nand_table[] = {
-    /* mid    did    name        page   spare  ppb  blocks row col dummy cont_read */
-    { 0xC8U, 0x91U, "GD5F1GM9", 2048U, 128U, 64U, 1024U, 3U, 2U, 8U,    1U },
-    { 0xC8U, 0x55U, "GD5F1GQ4", 2048U, 128U, 64U, 1024U, 3U, 2U, 8U,    0U },
+    /* mid    did    name        page   spare  ppb  blocks row col dummy cont CR bbm_page count offset */
+    { 0xC8U, 0x91U, "GD5F1GM9", 2048U, 128U, 64U, 1024U, 3U, 2U, 8U,    1U, 0U,     2U,     0U },
+    { 0xC8U, 0x55U, "GD5F1GQ4", 2048U, 128U, 64U, 1024U, 3U, 2U, 8U,    0U, 0U,     2U,     0U },
 };
 
 /* used when the ID is not in nand_table[]: common 1Gb 2K-page geometry */
 static const spi_nand_info_t nand_default =
-    { 0x00U, 0x00U, "unknown",  2048U, 128U, 64U, 1024U, 3U, 2U, 8U,    0U };
+    { 0x00U, 0x00U, "unknown",  2048U, 128U, 64U, 1024U, 3U, 2U, 8U,    0U, 0U, 0U, 0U };
 
 static const spi_nand_info_t *nand_info = NULL;
 
@@ -237,6 +237,45 @@ ErrStatus spi_nand_erase_blocks(uint32_t first_block, uint32_t block_count)
         }
     }
     return SUCCESS;
+}
+
+ErrStatus spi_nand_block_check_bad(uint32_t block)
+{
+    uint8_t saved_feature;
+    ErrStatus result = SUCCESS;
+
+    if((NULL == nand_info) || (block >= nand_info->block_count) ||
+       (0U == nand_info->bad_block_marker_count) ||
+       ((uint32_t)nand_info->bad_block_marker_page + nand_info->bad_block_marker_count > nand_info->pages_per_block) ||
+       (nand_info->bad_block_marker_offset >= nand_info->spare_size)) {
+        return ERROR;
+    }
+
+    saved_feature = spi_nand_get_feature(SPI_NAND_REG_FEATURE);
+    spi_nand_set_feature(SPI_NAND_REG_FEATURE, saved_feature & (uint8_t)~SPI_NAND_FEAT_ECC_EN);
+    if((wait_ready() & SPI_NAND_STAT_OIP) ||
+       (spi_nand_get_feature(SPI_NAND_REG_FEATURE) & SPI_NAND_FEAT_ECC_EN)) {
+        result = ERROR;
+    }
+
+    for(uint32_t i = 0U; (SUCCESS == result) && (i < nand_info->bad_block_marker_count); i++) {
+        const uint32_t page = block * nand_info->pages_per_block + nand_info->bad_block_marker_page + i;
+        uint8_t marker = 0xFFU;
+
+        if(ERROR == spi_nand_page_read(page, (uint16_t)(nand_info->page_size + nand_info->bad_block_marker_offset),
+                                       &marker, 1U)) {
+            result = ERROR;
+        } else if(0xFFU != marker) {
+            result = ERROR;
+        }
+    }
+
+    spi_nand_set_feature(SPI_NAND_REG_FEATURE, saved_feature);
+    if((wait_ready() & SPI_NAND_STAT_OIP) ||
+       (spi_nand_get_feature(SPI_NAND_REG_FEATURE) != saved_feature)) {
+        result = ERROR;
+    }
+    return result;
 }
 
 static ErrStatus page_program(uint32_t page, uint16_t column, const uint8_t *buf, uint16_t len, uint8_t quad)
