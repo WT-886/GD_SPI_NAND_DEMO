@@ -314,23 +314,32 @@ static uint8_t load_page(uint32_t page)
 }
 
 /* lines: 1 = single (03h), 2 = dual (3Bh), 4 = quad (6Bh) */
-static void read_cache(uint16_t column, uint8_t *buf, uint32_t len, uint8_t lines)
+static void read_cache(uint16_t column, uint8_t *buf, uint32_t len, uint8_t lines,
+                       uint8_t continuous_dummy_bytes)
 {
     static const uint8_t cmd[] = { 0U, CMD_READ_CACHE, CMD_READ_CACHE_DUAL, 0U, CMD_READ_CACHE_QUAD };
 
     CS_LOW();
     xfer(cmd[lines]);
-    send_address(column, nand_info->col_addr_bytes);
-    /* whole dummy bytes in single mode (8 clocks each) */
-    for(uint8_t i = 0U; i < nand_info->read_dummy_clocks / 8U; i++) {
-        xfer(DUMMY_BYTE);
+    if(continuous_dummy_bytes) {
+        for(uint8_t i = 0U; i < continuous_dummy_bytes; i++) {
+            xfer(DUMMY_BYTE);
+        }
+    } else {
+        send_address(column, nand_info->col_addr_bytes);
+        /* whole dummy bytes in single mode (8 clocks each) */
+        for(uint8_t i = 0U; i < nand_info->read_dummy_clocks / 8U; i++) {
+            xfer(DUMMY_BYTE);
+        }
     }
     if(lines > 1U) {
         /* SPI5 has no dual mode: dual data is sampled with the quad receiver, IO2/IO3 ignored */
         quad_enter(1U);
-        /* remaining dummy clocks in quad mode (2 clocks per byte) */
-        for(uint8_t i = 0U; i < (nand_info->read_dummy_clocks % 8U) / 2U; i++) {
-            xfer(DUMMY_BYTE);
+        if(0U == continuous_dummy_bytes) {
+            /* remaining dummy clocks in quad mode (2 clocks per byte) */
+            for(uint8_t i = 0U; i < (nand_info->read_dummy_clocks % 8U) / 2U; i++) {
+                xfer(DUMMY_BYTE);
+            }
         }
     }
     if(2U == lines) {
@@ -356,7 +365,18 @@ ErrStatus spi_nand_read_lines(uint32_t page, uint16_t column, uint8_t *buf, uint
 {
     const uint8_t status = load_page(page);
 
-    read_cache(column, buf, len, lines);
+    read_cache(column, buf, len, lines, 0U);
+
+    return ((status & SPI_NAND_STAT_OIP) ||
+            ((status & SPI_NAND_STAT_ECCS_MASK) == SPI_NAND_STAT_ECCS_UNCORR)) ? ERROR : SUCCESS;
+}
+
+ErrStatus spi_nand_read_continuous_lines(uint32_t page, uint8_t *buf, uint32_t len,
+                                         uint8_t lines, uint8_t dummy_bytes)
+{
+    const uint8_t status = load_page(page);
+
+    read_cache(0U, buf, len, lines, dummy_bytes);
 
     return ((status & SPI_NAND_STAT_OIP) ||
             ((status & SPI_NAND_STAT_ECCS_MASK) == SPI_NAND_STAT_ECCS_UNCORR)) ? ERROR : SUCCESS;

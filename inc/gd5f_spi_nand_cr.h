@@ -28,6 +28,8 @@
 #define SPI_NAND_CR_LOCK_CRDC       BIT(2)          /* CRDC, see datasheet register table */
 #define SPI_NAND_CR_LOCK_AL         BIT(1)          /* AL, see datasheet register table */
 #define SPI_NAND_CR_LOCK_RW_MASK    0x0EU           /* writable bits of 60h */
+#define SPI_NAND_CR_CRDC0_DUMMY_BYTES  4U           /* 32 clocks after cache-read opcode */
+#define SPI_NAND_CR_CRDC1_DUMMY_BYTES  3U           /* 24 clocks after cache-read opcode */
 /* 10h */
 #define SPI_NAND_CR_BFT_MASK        (BIT(7) | BIT(6) | BIT(5) | BIT(4))  /* BFT3..BFT0: bit-flip threshold */
 

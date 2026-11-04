@@ -19,7 +19,14 @@ ErrStatus spi_nand_set_continuous_read(uint8_t enable)
     return ((spi_nand_get_feature(SPI_NAND_REG_FEATURE) & SPI_NAND_CR_FEAT_NR) == (reg & SPI_NAND_CR_FEAT_NR)) ? SUCCESS : ERROR;
 }
 
-/* column bytes are don't-care in Continuous Read: output starts at byte 0 and runs on while CS stays low */
+static uint8_t continuous_read_dummy_bytes(void)
+{
+    const uint8_t reg = spi_nand_get_feature(SPI_NAND_CR_REG_BLOCK_LOCK);
+
+    return (reg & SPI_NAND_CR_LOCK_CRDC) ? SPI_NAND_CR_CRDC1_DUMMY_BYTES : SPI_NAND_CR_CRDC0_DUMMY_BYTES;
+}
+
+/* Continuous Read starts at byte 0 and continues across pages while CS stays low. */
 ErrStatus spi_nand_continuous_read(uint32_t start_page, uint8_t *buf, uint32_t len)
 {
     return spi_nand_read_lines(start_page, 0U, buf, len, 1U);
@@ -27,5 +34,5 @@ ErrStatus spi_nand_continuous_read(uint32_t start_page, uint8_t *buf, uint32_t l
 
 ErrStatus spi_nand_quad_continuous_read(uint32_t start_page, uint8_t *buf, uint32_t len)
 {
-    return spi_nand_read_lines(start_page, 0U, buf, len, 4U);
+    return spi_nand_read_continuous_lines(start_page, buf, len, 4U, continuous_read_dummy_bytes());
 }
