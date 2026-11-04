@@ -8,7 +8,7 @@
 #define CMD_READ_BBM_LINK_TABLE      0xA5U
 #define BBM_LBA_VALUE_MASK           0x3FFFU
 
-/* Example from the manual; replacement execution is deliberately disabled by default. */
+/* v1.0.0 demo: execution is enabled and may consume a persistent BBM link. */
 #ifndef SPI_NAND_BBM_DEMO_LBA
 #define SPI_NAND_BBM_DEMO_LBA        7U
 #endif

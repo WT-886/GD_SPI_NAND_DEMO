@@ -26,7 +26,7 @@
 
 /* add new parts here */
 static const spi_nand_info_t nand_table[] = {
-    /* mid    did    name        page   spare  ppb  blocks row col dummy cont CR bbm_page count offset BBM */
+    /* mid    did    name        page   spare  ppb  blocks row col dummy cont marker_page count offset BBM */
     { 0xC8U, 0x91U, "GD5F1GM9", 2048U, 128U, 64U, 1024U, 3U, 2U, 8U,    1U, 0U, 2U, 0U, 1U },
     { 0xC8U, 0x55U, "GD5F4GQ6", 2048U, 128U, 64U, 4096U, 3U, 2U, 8U,    0U, 0U, 2U, 0U, 0U },
 };

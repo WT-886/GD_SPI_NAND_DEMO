@@ -1,8 +1,8 @@
 /*!
     \file    gd32f450i_eval.h
-    \brief   definitions for GD32F450_EVAL's leds, keys and COM ports hardware resources
+    \brief   GD32450Z-EVAL LEDs, keys and COM resources (legacy filename retained)
     
-    \version 2026-02-05, V3.3.3, firmware for GD32F4xx
+    \version 2026-11-04, v1.0.0, board adaptation based on GD32F4xx firmware V3.3.3
 */
 
 /*

@@ -1,8 +1,8 @@
 /*!
     \file    main.c
-    \brief   led spark with systick
+    \brief   SPI NAND validation and BBM demo on GD32450Z-EVAL (GD32F450ZKT6)
 
-    \version 2026-02-05, V3.3.3, firmware for GD32F4xx
+    \version 2026-11-04, v1.0.0, project based on GD32F4xx firmware V3.3.3
 */
 
 /*

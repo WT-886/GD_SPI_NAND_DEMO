@@ -1,8 +1,8 @@
 /*!
     \file    readme.txt
-    \brief   description of the master receiver
+    \brief   GD32450Z-EVAL SPI NAND validation project
     
-    \version 2026-02-05, V3.3.3, firmware for GD32F4xx
+    \version 2026-11-04, v1.0.0, project based on GD32F4xx firmware V3.3.3
 */
 
 /*
@@ -32,6 +32,13 @@ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSI
 OF SUCH DAMAGE.
 */
 
-    This example is based on the GD32450I-EVAL-V1.1 board, it provides a
-  description of SysTick configuration, LED1 is spark. 
+        This project targets GD32450Z-EVAL with GD32F450ZKT6 and external
+    GD5F SPI NAND on SPI5 / GPIOG. It includes single/quad I/O tests,
+    GD5F1GM9 Continuous Read, full-chip random testing, and BBM diagnostics.
+
+        WARNING: The enabled erase/program tests destroy NAND data. The BBM
+    demo can create persistent mappings and consume internal link entries.
+
+        See ../README.md for wiring, build/deployment steps, module ownership,
+    test switches, datasheet references, development history and AI guidelines.
 

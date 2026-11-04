@@ -1,8 +1,8 @@
 /*!
     \file    main.h
-    \brief   the header file of main
+    \brief   application header for the GD32450Z-EVAL SPI NAND project
 
-    \version 2026-02-05, V3.3.3, firmware for GD32F4xx
+    \version 2026-11-04, v1.0.0, project based on GD32F4xx firmware V3.3.3
 */
 
 /*

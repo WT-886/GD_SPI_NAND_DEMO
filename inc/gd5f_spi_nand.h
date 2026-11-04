@@ -101,7 +101,7 @@ void spi_nand_set_feature(uint8_t reg, uint8_t value);
 
 /* page = absolute page index (block * pages_per_block + page_in_block) */
 ErrStatus spi_nand_block_erase(uint32_t block);
-/* erase whole physical blocks; all data in each selected block is destroyed */
+/* erase whole device-addressed blocks; chip BBM may redirect them; all selected data is destroyed */
 ErrStatus spi_nand_erase_blocks(uint32_t first_block, uint32_t block_count);
 /* SUCCESS: block is good; ERROR: bad marker found or marker read/configuration failed */
 ErrStatus spi_nand_block_check_bad(uint32_t block);
@@ -113,10 +113,10 @@ ErrStatus spi_nand_page_read(uint32_t page, uint16_t column, uint8_t *buf, uint1
 ErrStatus spi_nand_dual_page_read(uint32_t page, uint16_t column, uint8_t *buf, uint16_t len);
 ErrStatus spi_nand_quad_page_read(uint32_t page, uint16_t column, uint8_t *buf, uint16_t len);
 
-/* address is a physical byte offset in the main area (OOB excluded); ranges split at page boundaries */
+/* address is a device-visible main-area byte offset (OOB excluded); ranges split at page boundaries */
 /* caller must erase first and handle bad blocks; partial-page program limits are device-specific */
 ErrStatus spi_nand_program_data(uint32_t address, const uint8_t *buf, uint32_t len, spi_nand_io_mode_t mode);
-/* reads raw physical pages; bad blocks are not skipped or remapped */
+/* no software bad-block skipping or remapping; existing chip-internal BBM mappings still apply */
 ErrStatus spi_nand_read_data(uint32_t address, uint8_t *buf, uint32_t len, spi_nand_io_mode_t mode);
 
 #endif /* GD5F_SPI_NAND_H */

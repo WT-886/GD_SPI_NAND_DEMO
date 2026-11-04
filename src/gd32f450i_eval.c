@@ -1,8 +1,8 @@
 /*!
     \file    gd32f450i_eval.c
-    \brief   firmware functions to manage leds, keys, COM ports
+    \brief   GD32450Z-EVAL LED, key and USART0 support (legacy filename retained)
     
-    \version 2026-02-05, V3.3.3, firmware for GD32F4xx
+    \version 2026-11-04, v1.0.0, board adaptation based on GD32F4xx firmware V3.3.3
 */
 
 /*
