@@ -10,10 +10,10 @@
 
 /* Example from the manual; replacement execution is deliberately disabled by default. */
 #ifndef SPI_NAND_BBM_DEMO_LBA
-#define SPI_NAND_BBM_DEMO_LBA        4U
+#define SPI_NAND_BBM_DEMO_LBA        7U
 #endif
 #ifndef SPI_NAND_BBM_DEMO_PBA
-#define SPI_NAND_BBM_DEMO_PBA        1004U
+#define SPI_NAND_BBM_DEMO_PBA        1010U
 #endif
 #ifndef SPI_NAND_BBM_DEMO_EXECUTE
 #define SPI_NAND_BBM_DEMO_EXECUTE    1U     // 1=ON  0=OFF
@@ -34,7 +34,8 @@ static ErrStatus validate_candidate(uint16_t lba, uint16_t pba,
     for(uint32_t i = 0U; i < SPI_NAND_BBM_LINK_COUNT; i++) {
         if(SPI_NAND_BBM_LINK_AVAILABLE == links[i].status) {
             available++;
-        } else if((pba == links[i].pba) || (pba == links[i].lba)) {
+        } else if((SPI_NAND_BBM_LINK_VALID == links[i].status) &&
+                  ((pba == links[i].pba) || (pba == links[i].lba))) {
             return ERROR;
         }
     }
@@ -114,28 +115,38 @@ ErrStatus spi_nand_bbm_replace(uint16_t lba, uint16_t pba)
     return ERROR;
 }
 
-void spi_nand_bbm_demo(void)
+static void print_link_table(const spi_nand_bbm_link_t *links, uint8_t links_full)
 {
-    spi_nand_bbm_link_t links[SPI_NAND_BBM_LINK_COUNT];
-    uint8_t links_full;
     uint8_t available = 0U;
-
-    if(ERROR == spi_nand_bbm_read_links(links, &links_full)) {
-        printf("BBM: unsupported or link-table read failed\r\n");
-        return;
-    }
 
     printf("\r\n===== GD5F1GM9 BBM link table =====\r\n");
     printf("BBLS: %s\r\n", links_full ? "full" : "available");
     for(uint32_t i = 0U; i < SPI_NAND_BBM_LINK_COUNT; i++) {
         if(SPI_NAND_BBM_LINK_AVAILABLE == links[i].status) {
             available++;
-        } else {
+            printf("link %02lu: available\r\n", (unsigned long)i);
+        } else if(SPI_NAND_BBM_LINK_VALID == links[i].status) {
             printf("link %02lu: LBA %u -> PBA %u, status %u\r\n",
+                   (unsigned long)i, links[i].lba, links[i].pba, links[i].status);
+        } else {
+            printf("link %02lu: invalid, LBA %u, PBA %u, status %u\r\n",
                    (unsigned long)i, links[i].lba, links[i].pba, links[i].status);
         }
     }
     printf("Available links: %u/%u\r\n", available, SPI_NAND_BBM_LINK_COUNT);
+}
+
+void spi_nand_bbm_demo(void)
+{
+    spi_nand_bbm_link_t links[SPI_NAND_BBM_LINK_COUNT];
+    uint8_t links_full;
+
+    if(ERROR == spi_nand_bbm_read_links(links, &links_full)) {
+        printf("BBM: unsupported or link-table read failed\r\n");
+        return;
+    }
+
+    print_link_table(links, links_full);
     printf("Candidate: LBA %u -> PBA %u\r\n", SPI_NAND_BBM_DEMO_LBA, SPI_NAND_BBM_DEMO_PBA);
     printf("A1h updates block mapping only; back up/migrate data separately\r\n");
 
@@ -147,6 +158,13 @@ void spi_nand_bbm_demo(void)
 #if SPI_NAND_BBM_DEMO_EXECUTE
     printf("A1h result: %s\r\n",
            (SUCCESS == spi_nand_bbm_replace(SPI_NAND_BBM_DEMO_LBA, SPI_NAND_BBM_DEMO_PBA)) ? "PASS" : "FAIL");
+    printf("Status after A1h attempt: 0x%02X\r\n", spi_nand_get_feature(SPI_NAND_REG_STATUS));
+    if(ERROR == spi_nand_bbm_read_links(links, &links_full)) {
+        printf("BBM: link-table read after A1h attempt failed\r\n");
+        return;
+    }
+    printf("BBM: A5h readback after A1h attempt\r\n");
+    print_link_table(links, links_full);
 #else
     printf("Dry-run only; set SPI_NAND_BBM_DEMO_EXECUTE=1 to issue A1h\r\n");
 #endif
