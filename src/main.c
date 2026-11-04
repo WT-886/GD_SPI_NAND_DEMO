@@ -39,6 +39,7 @@ OF SUCH DAMAGE.
 #include "gd5f_spi_nand.h"
 #include "gd5f_spi_nand_cr.h"
 #include "gd5f_spi_nand_full_test.h"
+#include "gd5f_spi_nand_bbm.h"
 
 /* Reserve this block range for the timing demo; it will be erased and rewritten. */
 #define NAND_TEST_BLOCK          1U
@@ -277,21 +278,22 @@ int main(void)
     const spi_nand_info_t *nand;
 
     gd_eval_com_init(EVAL_COM0);
-        timing_init();
+    timing_init();
     nand = spi_nand_init();
     (void)spi_nand_set_continuous_read(0U);
 
     printf("\r\nSPI NAND: %s, ID 0x%04X, page %u+%u B\r\n",
            nand->name, spi_nand_read_id(), nand->page_size, nand->spare_size);
-        printf("Clock: core %lu MHz, APB2 %lu MHz, SPI SCK %lu MHz (PCLK2/%lu)\r\n",
-            (unsigned long)(SystemCoreClock / 1000000U),
-            (unsigned long)(rcu_clock_freq_get(CK_APB2) / 1000000U),
-            (unsigned long)(rcu_clock_freq_get(CK_APB2) / spi_nand_sck_divisor() / 1000000U),
-            (unsigned long)spi_nand_sck_divisor());
+    printf("Clock: core %lu MHz, APB2 %lu MHz, SPI SCK %lu MHz (PCLK2/%lu)\r\n",
+           (unsigned long)(SystemCoreClock / 1000000U),
+           (unsigned long)(rcu_clock_freq_get(CK_APB2) / 1000000U),
+           (unsigned long)(rcu_clock_freq_get(CK_APB2) / spi_nand_sck_divisor() / 1000000U),
+           (unsigned long)spi_nand_sck_divisor());
     nand_demo(nand);
 #if NAND_FULL_TEST_ENABLE
     (void)spi_nand_full_random_test(nand, NAND_FULL_TEST_IO_MODE);
 #endif
+    spi_nand_bbm_demo();
 
     while(1) {
     }

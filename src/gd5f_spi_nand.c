@@ -26,14 +26,14 @@
 
 /* add new parts here */
 static const spi_nand_info_t nand_table[] = {
-    /* mid    did    name        page   spare  ppb  blocks row col dummy cont CR bbm_page count offset */
-    { 0xC8U, 0x91U, "GD5F1GM9", 2048U, 128U, 64U, 1024U, 3U, 2U, 8U,    1U, 0U,     2U,     0U },
-    { 0xC8U, 0x55U, "GD5F1GQ4", 2048U, 128U, 64U, 1024U, 3U, 2U, 8U,    0U, 0U,     2U,     0U },
+    /* mid    did    name        page   spare  ppb  blocks row col dummy cont CR bbm_page count offset BBM */
+    { 0xC8U, 0x91U, "GD5F1GM9", 2048U, 128U, 64U, 1024U, 3U, 2U, 8U,    1U, 0U, 2U, 0U, 1U },
+    { 0xC8U, 0x55U, "GD5F4GQ6", 2048U, 128U, 64U, 4096U, 3U, 2U, 8U,    0U, 0U, 2U, 0U, 0U },
 };
 
 /* used when the ID is not in nand_table[]: common 1Gb 2K-page geometry */
 static const spi_nand_info_t nand_default =
-    { 0x00U, 0x00U, "unknown",  2048U, 128U, 64U, 1024U, 3U, 2U, 8U,    0U, 0U, 0U, 0U };
+    { 0x00U, 0x00U, "unknown",  2048U, 128U, 64U, 1024U, 3U, 2U, 8U,    0U, 0U, 0U, 0U, 0U };
 
 static const spi_nand_info_t *nand_info = NULL;
 
@@ -101,7 +101,7 @@ static uint8_t read_feature(uint8_t reg)
 }
 
 /* returns the last status (C0h); OIP is still set if the device never became ready */
-static uint8_t wait_ready(void)
+uint8_t spi_nand_wait_ready_internal(void)
 {
     uint8_t status;
     uint32_t t = SPI_NAND_BUSY_TIMEOUT;
@@ -111,6 +111,25 @@ static uint8_t wait_ready(void)
     } while((status & SPI_NAND_STAT_OIP) && --t);
 
     return status;
+}
+
+ErrStatus spi_nand_command_transfer(uint8_t command, const uint8_t *tx, uint32_t tx_len,
+                                   uint8_t *rx, uint32_t rx_len)
+{
+    if(((tx_len > 0U) && (NULL == tx)) || ((rx_len > 0U) && (NULL == rx))) {
+        return ERROR;
+    }
+
+    CS_LOW();
+    xfer(command);
+    while(tx_len--) {
+        xfer(*tx++);
+    }
+    while(rx_len--) {
+        *rx++ = xfer(DUMMY_BYTE);
+    }
+    CS_HIGH();
+    return SUCCESS;
 }
 
 static void bus_init(void)
@@ -157,7 +176,7 @@ const spi_nand_info_t *spi_nand_init(void)
     CS_LOW();
     xfer(CMD_RESET);
     CS_HIGH();
-    wait_ready();
+    spi_nand_wait_ready_internal();
 
     nand_info = &nand_default;
     id = spi_nand_read_id();
@@ -220,7 +239,7 @@ ErrStatus spi_nand_block_erase(uint32_t block)
     send_row_address(block * nand_info->pages_per_block);
     CS_HIGH();
 
-    return (wait_ready() & (SPI_NAND_STAT_OIP | SPI_NAND_STAT_E_FAIL)) ? ERROR : SUCCESS;
+    return (spi_nand_wait_ready_internal() & (SPI_NAND_STAT_OIP | SPI_NAND_STAT_E_FAIL)) ? ERROR : SUCCESS;
 }
 
 ErrStatus spi_nand_erase_blocks(uint32_t first_block, uint32_t block_count)
@@ -253,7 +272,7 @@ ErrStatus spi_nand_block_check_bad(uint32_t block)
 
     saved_feature = spi_nand_get_feature(SPI_NAND_REG_FEATURE);
     spi_nand_set_feature(SPI_NAND_REG_FEATURE, saved_feature & (uint8_t)~SPI_NAND_FEAT_ECC_EN);
-    if((wait_ready() & SPI_NAND_STAT_OIP) ||
+    if((spi_nand_wait_ready_internal() & SPI_NAND_STAT_OIP) ||
        (spi_nand_get_feature(SPI_NAND_REG_FEATURE) & SPI_NAND_FEAT_ECC_EN)) {
         result = ERROR;
     }
@@ -271,7 +290,7 @@ ErrStatus spi_nand_block_check_bad(uint32_t block)
     }
 
     spi_nand_set_feature(SPI_NAND_REG_FEATURE, saved_feature);
-    if((wait_ready() & SPI_NAND_STAT_OIP) ||
+    if((spi_nand_wait_ready_internal() & SPI_NAND_STAT_OIP) ||
        (spi_nand_get_feature(SPI_NAND_REG_FEATURE) != saved_feature)) {
         result = ERROR;
     }
@@ -301,7 +320,7 @@ static ErrStatus page_program(uint32_t page, uint16_t column, const uint8_t *buf
     send_row_address(page);
     CS_HIGH();
 
-    return (wait_ready() & (SPI_NAND_STAT_OIP | SPI_NAND_STAT_P_FAIL)) ? ERROR : SUCCESS;
+    return (spi_nand_wait_ready_internal() & (SPI_NAND_STAT_OIP | SPI_NAND_STAT_P_FAIL)) ? ERROR : SUCCESS;
 }
 
 static uint8_t load_page(uint32_t page)
@@ -310,7 +329,7 @@ static uint8_t load_page(uint32_t page)
     xfer(CMD_PAGE_READ);
     send_row_address(page);
     CS_HIGH();
-    return wait_ready();
+    return spi_nand_wait_ready_internal();
 }
 
 /* lines: 1 = single (03h), 2 = dual (3Bh), 4 = quad (6Bh) */

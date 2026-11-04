@@ -60,7 +60,7 @@
 #define SPI_NAND_STAT2_ECCSE_MASK   (BIT(5) | BIT(4))  /* extended ECC status, refines ECCS */
 #define SPI_NAND_STAT2_BPS          BIT(3)          /* BPS, see datasheet register table */
 
-/* ---------------- standard parts (e.g. GD5F1GQ4), see datasheet Features Settings table ---------------- */
+/* ---------------- standard parts (e.g. GD5F4GQ6), see datasheet Features Settings table ---------------- */
 #define SPI_NAND_STD_FEAT_BPL       BIT(3)          /* B0h: block protection lock */
 #define SPI_NAND_STD_DRV_RW_MASK    0x60U           /* D0h writable bits: DS_S1/DS_S0 only */
 /* Continuous Read parts (e.g. GD5F1GM9) use a different B0h/C0h/D0h/F0h layout: see gd5f_spi_nand_cr.h */
@@ -81,6 +81,7 @@ typedef struct {
     uint8_t     bad_block_marker_page;  /* first in-block page checked for factory bad-block marker */
     uint8_t     bad_block_marker_count; /* number of consecutive marker pages */
     uint16_t    bad_block_marker_offset;/* byte offset in spare area; marker value other than FFh means bad */
+    uint8_t     bbm_supported;       /* 1: supports A1h/A5h BBM commands */
 } spi_nand_info_t;
 
 typedef enum {
@@ -89,7 +90,7 @@ typedef enum {
     SPI_NAND_IO_QUAD   = 4U
 } spi_nand_io_mode_t;
 
-/* init SPI + GPIO, reset device, unlock blocks, enable QE; unknown IDs get a default 1Gb geometry */
+/* init SPI + GPIO, reset device, unlock blocks, enable QE; unknown IDs get a fallback geometry */
 const spi_nand_info_t *spi_nand_init(void);
 const spi_nand_info_t *spi_nand_get_info(void);
 /* raw ID: manufacturer ID in high byte, device ID in low byte */
