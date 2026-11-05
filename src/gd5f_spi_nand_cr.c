@@ -23,6 +23,7 @@ static uint8_t continuous_read_dummy_bytes(void)
 {
     const uint8_t reg = spi_nand_get_feature(SPI_NAND_CR_REG_BLOCK_LOCK);
 
+    /* CRDC selects the device's 32- or 24-clock pre-data interval. */
     return (reg & SPI_NAND_CR_LOCK_CRDC) ? SPI_NAND_CR_CRDC1_DUMMY_BYTES : SPI_NAND_CR_CRDC0_DUMMY_BYTES;
 }
 

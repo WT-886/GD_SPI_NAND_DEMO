@@ -90,31 +90,37 @@ typedef enum {
     SPI_NAND_IO_QUAD   = 4U
 } spi_nand_io_mode_t;
 
-/* init SPI + GPIO, reset device, unlock blocks, enable QE; unknown IDs get a fallback geometry */
+/* Initialize the bus, reset and configure the NAND. Unknown IDs return fallback geometry, not support. */
 const spi_nand_info_t *spi_nand_init(void);
+/* Return the geometry/capabilities selected by the most recent init; NULL before init. */
 const spi_nand_info_t *spi_nand_get_info(void);
 /* raw ID: manufacturer ID in high byte, device ID in low byte */
 uint16_t spi_nand_read_id(void);
 
+/* Read or write a feature register; set_feature does not wait for or verify the update. */
 uint8_t spi_nand_get_feature(uint8_t reg);
 void spi_nand_set_feature(uint8_t reg, uint8_t value);
 
-/* page = absolute page index (block * pages_per_block + page_in_block) */
+/* page/block arguments are device-visible addresses; chip-internal BBM redirection still applies. */
+/* page = absolute page index (block * pages_per_block + page_in_block); caller supplies a valid block. */
 ErrStatus spi_nand_block_erase(uint32_t block);
-/* erase whole device-addressed blocks; chip BBM may redirect them; all selected data is destroyed */
+/* Validate the block range, erase sequentially, and stop at the first failure; all selected data is destroyed. */
 ErrStatus spi_nand_erase_blocks(uint32_t first_block, uint32_t block_count);
 /* SUCCESS: block is good; ERROR: bad marker found or marker read/configuration failed */
 ErrStatus spi_nand_block_check_bad(uint32_t block);
+/* Program one page at a column offset; caller must erase first and honor per-device partial-program limits. */
 ErrStatus spi_nand_page_program(uint32_t page, uint16_t column, const uint8_t *buf, uint16_t len);
+/* Same page-program operation using four data lines. */
 ErrStatus spi_nand_quad_page_program(uint32_t page, uint16_t column, const uint8_t *buf, uint16_t len);
 /* return ERROR when ECC reports an uncorrectable error */
 ErrStatus spi_nand_page_read(uint32_t page, uint16_t column, uint8_t *buf, uint16_t len);
 /* dual output read from cache (3Bh), sampled through the SPI5 quad receiver */
 ErrStatus spi_nand_dual_page_read(uint32_t page, uint16_t column, uint8_t *buf, uint16_t len);
+/* Read one page from cache using four data lines. */
 ErrStatus spi_nand_quad_page_read(uint32_t page, uint16_t column, uint8_t *buf, uint16_t len);
 
 /* address is a device-visible main-area byte offset (OOB excluded); ranges split at page boundaries */
-/* caller must erase first and handle bad blocks; partial-page program limits are device-specific */
+/* Caller must erase first and manage bad blocks; partial-page limits are device-specific. */
 ErrStatus spi_nand_program_data(uint32_t address, const uint8_t *buf, uint32_t len, spi_nand_io_mode_t mode);
 /* no software bad-block skipping or remapping; existing chip-internal BBM mappings still apply */
 ErrStatus spi_nand_read_data(uint32_t address, uint8_t *buf, uint32_t len, spi_nand_io_mode_t mode);

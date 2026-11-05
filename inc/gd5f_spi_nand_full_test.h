@@ -3,6 +3,7 @@
 
 #include "gd5f_spi_nand.h"
 
+/* Destructively erase and rewrite every marker-good block, then verify read modes supported by nand. */
 ErrStatus spi_nand_full_random_test(const spi_nand_info_t *nand, spi_nand_io_mode_t mode);
 
 #endif /* GD5F_SPI_NAND_FULL_TEST_H */

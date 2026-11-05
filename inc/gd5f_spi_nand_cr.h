@@ -33,8 +33,11 @@
 /* 10h */
 #define SPI_NAND_CR_BFT_MASK        (BIT(7) | BIT(6) | BIT(5) | BIT(4))  /* BFT3..BFT0: bit-flip threshold */
 
+/* enable=1 selects Continuous Read; enable=0 restores Normal Read. Returns ERROR on unsupported parts. */
 ErrStatus spi_nand_set_continuous_read(uint8_t enable);
+/* Read len main-area bytes from start_page over one data line; the stream can span pages. */
 ErrStatus spi_nand_continuous_read(uint32_t start_page, uint8_t *buf, uint32_t len);
+/* Same stream over four data lines using the device's current CRDC dummy timing. */
 ErrStatus spi_nand_quad_continuous_read(uint32_t start_page, uint8_t *buf, uint32_t len);
 
 #endif /* GD5F_SPI_NAND_CR_H */

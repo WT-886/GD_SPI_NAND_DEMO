@@ -17,7 +17,7 @@
 #define SPI_NAND_BBM_DEMO_PBA        1011U
 #endif
 #ifndef SPI_NAND_BBM_DEMO_EXECUTE
-#define SPI_NAND_BBM_DEMO_EXECUTE    1U     // 1=ON  0=OFF
+#define SPI_NAND_BBM_DEMO_EXECUTE    0U     // 1=ON  0=OFF
 #endif
 
 static ErrStatus validate_candidate(uint16_t lba, uint16_t pba,
@@ -27,6 +27,7 @@ static ErrStatus validate_candidate(uint16_t lba, uint16_t pba,
     uint8_t available = 0U;
      uint8_t source_links = 0U;
 
+    /* Reject address/table conflicts before the destination is erased; marker-read errors also reject it. */
     if((NULL == nand) || !nand->bbm_supported || (lba >= nand->block_count) ||
          (pba >= nand->block_count) || (lba == pba) || links_full) {
         return ERROR;
@@ -60,10 +61,12 @@ static ErrStatus migrate_block(uint16_t lba, uint16_t pba, const spi_nand_info_t
     const uint32_t source_page = (uint32_t)lba * nand->pages_per_block;
     const uint32_t target_page = (uint32_t)pba * nand->pages_per_block;
 
+    /* The caller must reserve this block: migration deliberately destroys its previous contents. */
     if(ERROR == spi_nand_block_erase(pba)) {
         return ERROR;
     }
 
+    /* Copy the currently visible LBA data first; a later page error prevents A1h from being issued. */
     for(uint32_t page = 0U; page < nand->pages_per_block; page++) {
         if((ERROR == spi_nand_page_read(source_page + page, 0U, source_data, nand->page_size)) ||
            (ERROR == spi_nand_page_program(target_page + page, 0U, source_data, nand->page_size))) {
@@ -71,6 +74,7 @@ static ErrStatus migrate_block(uint16_t lba, uint16_t pba, const spi_nand_info_t
         }
     }
 
+    /* Verify every main-area page before changing the persistent mapping. */
     for(uint32_t page = 0U; page < nand->pages_per_block; page++) {
         if((ERROR == spi_nand_page_read(source_page + page, 0U, source_data, nand->page_size)) ||
            (ERROR == spi_nand_page_read(target_page + page, 0U, verify_data, nand->page_size)) ||
@@ -93,6 +97,7 @@ ErrStatus spi_nand_bbm_read_links(spi_nand_bbm_link_t *links, uint8_t *links_ful
         return ERROR;
     }
 
+    /* A5h returns fixed four-byte entries; the top two LBA bits carry each entry's state. */
     if(ERROR == spi_nand_command_transfer(CMD_READ_BBM_LINK_TABLE, &dummy, 1U, raw, sizeof(raw))) {
         return ERROR;
     }
@@ -120,6 +125,7 @@ ErrStatus spi_nand_bbm_replace(uint16_t lba, uint16_t pba)
     uint8_t feature;
     uint8_t matching_links = 0U;
 
+    /* Require a supported, idle device in the normal data path before reading source pages. */
     if((NULL == nand) || !nand->bbm_supported || (0U == nand->page_size) ||
        (nand->page_size > SPI_NAND_MAX_PAGE_SIZE) || (0U == nand->pages_per_block) ||
        (spi_nand_wait_ready_internal() & SPI_NAND_STAT_OIP)) {
@@ -131,14 +137,17 @@ ErrStatus spi_nand_bbm_replace(uint16_t lba, uint16_t pba)
         return ERROR;
     }
 
+    /* Snapshot the table and validate the target before any destructive operation. */
     if(ERROR == spi_nand_bbm_read_links(links, &links_full) ||
        ERROR == validate_candidate(lba, pba, links, links_full)) {
         return ERROR;
     }
 
+    /* A1h is the commit point: do not reach it unless copy and readback verification succeed. */
     if(ERROR == migrate_block(lba, pba, nand)) {
         return ERROR;
     }
+    /* Abort if another client changed the mapping table during the copy. */
     if(ERROR == spi_nand_bbm_read_links(checked_links, &links_full) ||
        ERROR == validate_candidate(lba, pba, checked_links, links_full)) {
         return ERROR;
@@ -151,6 +160,7 @@ ErrStatus spi_nand_bbm_replace(uint16_t lba, uint16_t pba)
         }
     }
 
+    /* Arm the one-shot A1h write only after migration and the table recheck. */
     if(ERROR == spi_nand_command_transfer(CMD_WRITE_ENABLE, NULL, 0U, NULL, 0U)) {
         return ERROR;
     }
@@ -175,6 +185,7 @@ ErrStatus spi_nand_bbm_replace(uint16_t lba, uint16_t pba)
         return ERROR;
     }
 
+    /* A successful command must leave exactly one valid entry for this LBA and target. */
     for(uint32_t i = 0U; i < SPI_NAND_BBM_LINK_COUNT; i++) {
         if((SPI_NAND_BBM_LINK_VALID == links[i].status) && (lba == links[i].lba)) {
             if(pba != links[i].pba) {
@@ -190,6 +201,7 @@ static void print_link_table(const spi_nand_bbm_link_t *links, uint8_t links_ful
 {
     uint8_t available = 0U;
 
+    /* Keep available and consumed-invalid entries visible; both affect future capacity decisions. */
     printf("\r\n===== GD5F1GM9 BBM link table =====\r\n");
     printf("BBLS: %s\r\n", links_full ? "full" : "available");
     for(uint32_t i = 0U; i < SPI_NAND_BBM_LINK_COUNT; i++) {
@@ -212,6 +224,7 @@ void spi_nand_bbm_demo(void)
     spi_nand_bbm_link_t links[SPI_NAND_BBM_LINK_COUNT];
     uint8_t links_full;
 
+    /* Report actual device state first; the configured candidate is not assumed to be free. */
     if(ERROR == spi_nand_bbm_read_links(links, &links_full)) {
         printf("BBM: unsupported or link-table read failed\r\n");
         return;

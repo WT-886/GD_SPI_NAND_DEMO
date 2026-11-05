@@ -56,6 +56,7 @@ static uint8_t cr_buffer[CR_BUFFER_SIZE];
 
 static void timing_init(void)
 {
+    /* Enable the Cortex-M DWT cycle counter used by the NAND timing reports. */
     CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
     DWT->CYCCNT = 0U;
     DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
@@ -77,6 +78,7 @@ static void timing_report(const char *name, uint32_t start)
 
 static uint32_t spi_nand_sck_divisor(void)
 {
+    /* Decode the SPI baud-rate prescaler so the startup log reports the live SCK divisor. */
     const uint32_t prescaler = (SPI_CTL0(SPI_NAND_SPI) & SPI_CTL0_PSC) >> 3U;
 
     return 2U << prescaler;
@@ -84,6 +86,7 @@ static uint32_t spi_nand_sck_divisor(void)
 
 static void fill_test_page(uint8_t *buf, uint16_t size, uint32_t page)
 {
+    /* Page-index-dependent pattern lets every transfer mode verify the same test data. */
     for(uint32_t i = 0U; i < size; i++) {
         buf[i] = (uint8_t)(i + page);
     }
@@ -129,6 +132,7 @@ static ErrStatus verify_continuous(const spi_nand_info_t *nand, uint32_t first_p
     if(0U == max_chunk_pages) {
         return ERROR;
     }
+    /* Bound each stream by buffer size and block end; Continuous Read must not cross a block here. */
     while(offset_pages < page_count) {
         const uint32_t page = first_page + offset_pages;
         const uint32_t pages_to_block_end = nand->pages_per_block - (page % nand->pages_per_block);
@@ -167,6 +171,7 @@ static ErrStatus set_crdc(uint8_t enabled)
 {
     uint8_t reg = spi_nand_get_feature(SPI_NAND_CR_REG_BLOCK_LOCK) & SPI_NAND_CR_LOCK_RW_MASK;
 
+    /* Preserve other writable 60h bits while selecting the CRDC dummy-clock mode. */
     if(enabled) {
         reg |= SPI_NAND_CR_LOCK_CRDC;
     } else {
@@ -189,6 +194,7 @@ static void nand_demo(const spi_nand_info_t *nand)
     uint8_t saved_lock;
     ErrStatus result;
 
+    /* This timing demo erases the configured range twice; validate it before touching NAND. */
     if((NAND_TEST_BLOCK >= nand->block_count) ||
        (0U == NAND_TEST_BLOCK_COUNT) ||
        (NAND_TEST_BLOCK_COUNT > (uint32_t)nand->block_count - NAND_TEST_BLOCK)) {
@@ -278,6 +284,7 @@ int main(void)
 {
     const spi_nand_info_t *nand;
 
+    /* Restore Normal Read before any program/erase operation; then run only the enabled demos. */
     gd_eval_com_init(EVAL_COM0);
     timing_init();
     nand = spi_nand_init();

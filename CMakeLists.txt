@@ -124,7 +124,7 @@ list(APPEND SOURCES ${SOURCE_GLOB_4})
 # 可在此增删源文件，例如 list(APPEND SOURCES ${CMAKE_SOURCE_DIR}/my/extra.c)
 # GD32H759 reference code, kept for reading only
 list(FILTER SOURCES EXCLUDE REGEX "/src/continuous_read/")
-list(FILTER SOURCES EXCLUDE REGEX "/tests/")
+list(FILTER SOURCES EXCLUDE REGEX "/host_tests/")
 # ---- [mcudeva:user] END sources ----
 
 # ==== [mcudeva:auto] BEGIN target (hash:57a9b457) ====

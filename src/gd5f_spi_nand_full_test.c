@@ -22,6 +22,7 @@ static uint8_t cr_buffer[FULL_TEST_CR_BUFFER_SIZE];
 
 static uint32_t random_next(uint32_t *state)
 {
+    /* xorshift32 keeps the test deterministic without a runtime RNG dependency. */
     uint32_t value = *state;
 
     value ^= value << 13;
@@ -33,6 +34,7 @@ static uint32_t random_next(uint32_t *state)
 
 static void fill_random_page(uint8_t *buf, uint16_t size, uint32_t block, uint32_t page)
 {
+    /* Derive an independent repeatable page pattern so the same data can be regenerated for verify. */
     uint32_t state = FULL_TEST_RANDOM_SEED ^ (block * 0x9E3779B9U) ^ (page * 0x85EBCA6BU);
 
     if(0U == state) {
@@ -46,6 +48,7 @@ static void fill_random_page(uint8_t *buf, uint16_t size, uint32_t block, uint32
 static uint32_t verify_normal_mode(const spi_nand_info_t *nand, spi_nand_io_mode_t mode,
                                    const char *mode_name)
 {
+    /* Recreate each page pattern and count failures by block to keep logs concise. */
     uint32_t failed_blocks = 0U;
 
     printf("\r\n%s normal read/verify\r\n", mode_name);
@@ -87,6 +90,7 @@ static uint32_t verify_continuous_mode(const spi_nand_info_t *nand,
                                       ErrStatus (*read_stream)(uint32_t, uint8_t *, uint32_t),
                                       const char *mode_name)
 {
+    /* Each stream is bounded to one block and the scratch buffer to avoid crossing NAND block boundaries. */
     uint32_t chunk_pages = FULL_TEST_CR_BUFFER_SIZE / nand->page_size;
     uint32_t failed_blocks = 0U;
 
@@ -142,7 +146,8 @@ ErrStatus spi_nand_full_random_test(const spi_nand_info_t *nand, spi_nand_io_mod
     uint32_t programmed_blocks = 0U;
     uint32_t read_failed = 0U;
 
-     if((NULL == nand) || (0U == nand->block_count) ||
+    /* This test destroys all marker-good blocks; it deliberately does not issue BBM mappings. */
+    if((NULL == nand) || (0U == nand->block_count) ||
          (0U == nand->pages_per_block) || (nand->page_size > sizeof(tx_page)) ||
          (nand->block_count > FULL_TEST_MAX_BLOCKS) ||
        ((SPI_NAND_IO_SINGLE != mode) && (SPI_NAND_IO_QUAD != mode)) ||

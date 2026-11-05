@@ -5,29 +5,30 @@
 #include <stdio.h>
 #include <string.h>
 
-#define TEST_BLOCKS 8U
-#define TEST_PAGES 3U
-#define TEST_PAGE_SIZE 16U
-#define SOURCE_BLOCK 1U
-#define TARGET_BLOCK 6U
+#define TEST_BLOCKS 8U        /* Simulated device block count; keeps address checks realistic. */
+#define TEST_PAGES 3U         /* Pages per simulated block; small to keep scenarios fast. */
+#define TEST_PAGE_SIZE 16U    /* Main-area bytes per simulated page. */
+#define SOURCE_BLOCK 1U       /* Device-visible LBA whose contents are copied. */
+#define TARGET_BLOCK 6U       /* Reserved PBA erased and populated by the migration. */
 
+/* Faults are injected at the operation boundary; A1h faults occur after its command is issued. */
 typedef enum {
-    FAULT_NONE,
-    FAULT_ERASE,
-    FAULT_SOURCE_READ,
-    FAULT_PROGRAM,
-    FAULT_TARGET_READ,
-    FAULT_COMPARE,
-    FAULT_TABLE_REREAD,
-    FAULT_TABLE_CHANGE,
-    FAULT_SOURCE_MAPPING_CHANGE,
-    FAULT_WRITE_ENABLE,
-    FAULT_WEL,
-    FAULT_A1_TRANSFER,
-    FAULT_A1_BUSY,
-    FAULT_A1_PFAIL,
-    FAULT_A1_NO_MAPPING,
-    FAULT_POST_TABLE_READ
+    FAULT_NONE,                 /* Run without an injected failure. */
+    FAULT_ERASE,                /* Fail erasing the target before copying. */
+    FAULT_SOURCE_READ,          /* Fail while reading source data. */
+    FAULT_PROGRAM,              /* Fail a target-page program during copying. */
+    FAULT_TARGET_READ,          /* Fail while reading the copied target data. */
+    FAULT_COMPARE,              /* Return corrupted target data to fail verification. */
+    FAULT_TABLE_REREAD,         /* Fail the pre-commit A5h table reread. */
+    FAULT_TABLE_CHANGE,         /* Occupy the target from another mapping before commit. */
+    FAULT_SOURCE_MAPPING_CHANGE,/* Change the source mapping while copying. */
+    FAULT_WRITE_ENABLE,         /* Fail the WREN command before A1h. */
+    FAULT_WEL,                  /* Leave WEL clear after WREN. */
+    FAULT_A1_TRANSFER,          /* Report a transfer error after issuing A1h. */
+    FAULT_A1_BUSY,              /* Keep OIP set after A1h. */
+    FAULT_A1_PFAIL,             /* Report program failure after A1h. */
+    FAULT_A1_NO_MAPPING,         /* Complete A1h without adding the expected link. */
+    FAULT_POST_TABLE_READ        /* Fail reading A5h after the A1h attempt. */
 } test_fault_t;
 
 static spi_nand_info_t device;
@@ -46,6 +47,7 @@ static unsigned int a1_count;
 static unsigned int table_reads;
 static unsigned int cases;
 
+/* Resolve device-visible block addresses through the simulated valid-link table. */
 static uint32_t physical_block(uint32_t block)
 {
     for(uint32_t index = 0U; index < SPI_NAND_BBM_LINK_COUNT; index++) {
@@ -58,6 +60,7 @@ static uint32_t physical_block(uint32_t block)
 
 static void reset_device(void)
 {
+    /* Each scenario starts from independent geometry, feature state, table, and deterministic data. */
     memset(&device, 0, sizeof(device));
     memset(links, 0, sizeof(links));
     device.page_size = TEST_PAGE_SIZE;
@@ -86,6 +89,7 @@ static void reset_device(void)
 
 const spi_nand_info_t *spi_nand_get_info(void)
 {
+    /* Stand-in for the driver's initialized device descriptor. */
     return no_device ? NULL : &device;
 }
 
@@ -96,6 +100,7 @@ uint8_t spi_nand_get_feature(uint8_t reg)
 
 uint8_t spi_nand_wait_ready_internal(void)
 {
+    /* Model delayed completion and program-fail status for the A1h commit path. */
     if(a1_count && (FAULT_A1_BUSY == fault)) {
         return SPI_NAND_STAT_OIP;
     }
@@ -107,6 +112,7 @@ uint8_t spi_nand_wait_ready_internal(void)
 
 ErrStatus spi_nand_block_check_bad(uint32_t block)
 {
+    /* The test target is fixed; this also proves marker validation precedes erase and mapping. */
     assert(TARGET_BLOCK == block);
     assert(0U == a1_count);
     return target_bad ? ERROR : SUCCESS;
@@ -114,6 +120,7 @@ ErrStatus spi_nand_block_check_bad(uint32_t block)
 
 ErrStatus spi_nand_block_erase(uint32_t block)
 {
+    /* A successful erase destroys the target's previous simulated contents. */
     assert(TARGET_BLOCK == block);
     assert(0U == a1_count);
     erase_count++;
@@ -130,6 +137,7 @@ ErrStatus spi_nand_page_read(uint32_t page, uint16_t column, uint8_t *data, uint
     assert(0U == column);
     assert(TEST_PAGE_SIZE == length);
     assert(block < TEST_BLOCKS);
+    /* Inject source/target read errors or a silent target corruption detected by readback. */
     if(((SOURCE_BLOCK == page / TEST_PAGES) && (FAULT_SOURCE_READ == fault)) ||
        ((TARGET_BLOCK == block) && (FAULT_TARGET_READ == fault))) {
         return ERROR;
@@ -148,6 +156,7 @@ ErrStatus spi_nand_page_program(uint32_t page, uint16_t column, const uint8_t *d
     assert(TEST_PAGE_SIZE == length);
     assert(1U == erase_count);
     assert(0U == a1_count);
+    /* Programs are accepted only after target erase and before the A1h mapping commit. */
     program_count++;
     if((FAULT_PROGRAM == fault) && (2U == program_count)) {
         return ERROR;
@@ -160,6 +169,7 @@ ErrStatus spi_nand_command_transfer(uint8_t command, const uint8_t *tx, uint32_t
                                    uint8_t *rx, uint32_t rx_len)
 {
     if(0xA5U == command) {
+        /* A5h serializes the 20-entry table and can model a concurrent table change between reads. */
         assert(1U == tx_len);
         assert(SPI_NAND_BBM_LINK_COUNT * 4U == rx_len);
         table_reads++;
@@ -187,6 +197,7 @@ ErrStatus spi_nand_command_transfer(uint8_t command, const uint8_t *tx, uint32_t
         return SUCCESS;
     }
     if(0x06U == command) {
+        /* WREN sets WEL unless the selected pre-A1h failure is injected. */
         if(FAULT_WRITE_ENABLE == fault) {
             return ERROR;
         }
@@ -194,6 +205,7 @@ ErrStatus spi_nand_command_transfer(uint8_t command, const uint8_t *tx, uint32_t
         return SUCCESS;
     }
     assert(0xA1U == command);
+    /* Reaching A1h proves every source page was copied and the destination readback matched. */
     assert(4U == tx_len);
     assert(SOURCE_BLOCK == (((uint16_t)tx[0] << 8) | tx[1]));
     assert(TARGET_BLOCK == (((uint16_t)tx[2] << 8) | tx[3]));
@@ -224,6 +236,7 @@ ErrStatus spi_nand_command_transfer(uint8_t command, const uint8_t *tx, uint32_t
 
 static void check_case(const char *name, ErrStatus result, unsigned int commits)
 {
+    /* Verify the expected result/commit count and that only a successful mapping redirects the source. */
     memcpy(expected, storage[physical_block(SOURCE_BLOCK)], sizeof(expected));
     assert(result == spi_nand_bbm_replace(SOURCE_BLOCK, TARGET_BLOCK));
     assert(commits == a1_count);
@@ -242,6 +255,7 @@ static void check_case(const char *name, ErrStatus result, unsigned int commits)
 
 int main(void)
 {
+    /* Success cases cover first mapping, remapping the current visible source, and historical PBA reuse. */
     reset_device();
     check_case("new mapping preserves main data", SUCCESS, 1U);
     reset_device();
@@ -251,12 +265,14 @@ int main(void)
     links[0] = (spi_nand_bbm_link_t){ SOURCE_BLOCK, TARGET_BLOCK, SPI_NAND_BBM_LINK_INVALID };
     check_case("historical target reuse", SUCCESS, 1U);
 
+    /* Every injected failure must abort at its boundary; pre-A1h faults must not consume a link. */
     for(test_fault_t current = FAULT_ERASE; current <= FAULT_POST_TABLE_READ; current++) {
         reset_device();
         fault = current;
         check_case("injected migration/commit failure", ERROR,
                    (current >= FAULT_A1_TRANSFER) ? 1U : 0U);
     }
+    /* Invalid operating modes, geometry, mappings, or capacity must be rejected before erase. */
     reset_device(); target_bad = 1U;
     check_case("bad/unreadable target rejected", ERROR, 0U);
     assert(0U == erase_count);

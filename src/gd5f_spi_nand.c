@@ -37,6 +37,7 @@ static const spi_nand_info_t nand_default =
 
 static const spi_nand_info_t *nand_info = NULL;
 
+/* Exchange one byte in full-duplex mode; each transfer waits for both TX and RX readiness. */
 static uint8_t xfer(uint8_t byte)
 {
     while(RESET == spi_i2s_flag_get(SPI_NAND_SPI, SPI_FLAG_TBE));
@@ -47,6 +48,7 @@ static uint8_t xfer(uint8_t byte)
 
 static void send_address(uint32_t addr, uint8_t bytes)
 {
+    /* NAND command addresses are sent most-significant byte first. */
     while(bytes--) {
         xfer((uint8_t)(addr >> (8U * bytes)));
     }
@@ -54,6 +56,7 @@ static void send_address(uint32_t addr, uint8_t bytes)
 
 static void send_row_address(uint32_t page)
 {
+    /* Row addresses use the byte width selected for the detected NAND. */
     send_address(page, nand_info->row_addr_bytes);
 }
 
@@ -120,6 +123,7 @@ ErrStatus spi_nand_command_transfer(uint8_t command, const uint8_t *tx, uint32_t
         return ERROR;
     }
 
+    /* Keep one CS window across the command, payload, and optional response. */
     CS_LOW();
     xfer(command);
     while(tx_len--) {
@@ -138,6 +142,7 @@ static void bus_init(void)
                              SPI_NAND_IO2_PIN | SPI_NAND_IO3_PIN;
     spi_parameter_struct spi_init_struct;
 
+    /* Configure the shared single/quad pins before enabling the SPI peripheral. */
     rcu_periph_clock_enable(SPI_NAND_GPIO_CLK);
     rcu_periph_clock_enable(SPI_NAND_SPI_CLK);
 
@@ -171,6 +176,7 @@ const spi_nand_info_t *spi_nand_init(void)
     uint16_t id;
     uint8_t reg;
 
+    /* Reset first so ID and feature reads start from a known device state. */
     bus_init();
 
     CS_LOW();
@@ -178,6 +184,7 @@ const spi_nand_info_t *spi_nand_init(void)
     CS_HIGH();
     spi_nand_wait_ready_internal();
 
+    /* Keep a safe fallback geometry for diagnostics, but it does not imply support. */
     nand_info = &nand_default;
     id = spi_nand_read_id();
     for(uint32_t i = 0U; i < sizeof(nand_table) / sizeof(nand_table[0]); i++) {
@@ -206,6 +213,7 @@ uint16_t spi_nand_read_id(void)
 {
     uint16_t id;
 
+    /* The ID response begins after one dummy address byte. */
     CS_LOW();
     xfer(CMD_READ_ID);
     xfer(0x00U);
@@ -232,6 +240,7 @@ void spi_nand_set_feature(uint8_t reg, uint8_t value)
 
 ErrStatus spi_nand_block_erase(uint32_t block)
 {
+    /* Convert the block number to its first row; caller must pass a valid block. */
     write_enable();
 
     CS_LOW();
@@ -270,6 +279,7 @@ ErrStatus spi_nand_block_check_bad(uint32_t block)
         return ERROR;
     }
 
+    /* Read the factory marker as raw spare data, then restore ECC/configuration on every path. */
     saved_feature = spi_nand_get_feature(SPI_NAND_REG_FEATURE);
     spi_nand_set_feature(SPI_NAND_REG_FEATURE, saved_feature & (uint8_t)~SPI_NAND_FEAT_ECC_EN);
     if((spi_nand_wait_ready_internal() & SPI_NAND_STAT_OIP) ||
@@ -299,6 +309,7 @@ ErrStatus spi_nand_block_check_bad(uint32_t block)
 
 static ErrStatus page_program(uint32_t page, uint16_t column, const uint8_t *buf, uint16_t len, uint8_t quad)
 {
+    /* Load cache data first, then execute the page program at the requested row. */
     write_enable();
 
     CS_LOW();
@@ -325,6 +336,7 @@ static ErrStatus page_program(uint32_t page, uint16_t column, const uint8_t *buf
 
 static uint8_t load_page(uint32_t page)
 {
+    /* 13h transfers the selected array row into the NAND's page cache. */
     CS_LOW();
     xfer(CMD_PAGE_READ);
     send_row_address(page);
@@ -382,6 +394,7 @@ static void read_cache(uint16_t column, uint8_t *buf, uint32_t len, uint8_t line
 
 ErrStatus spi_nand_read_lines(uint32_t page, uint16_t column, uint8_t *buf, uint32_t len, uint8_t lines)
 {
+    /* Cache data is still drained on read completion; report timeout/ECC afterward. */
     const uint8_t status = load_page(page);
 
     read_cache(column, buf, len, lines, 0U);
@@ -393,6 +406,7 @@ ErrStatus spi_nand_read_lines(uint32_t page, uint16_t column, uint8_t *buf, uint
 ErrStatus spi_nand_read_continuous_lines(uint32_t page, uint8_t *buf, uint32_t len,
                                          uint8_t lines, uint8_t dummy_bytes)
 {
+    /* Continuous Read omits the column address; the feature module supplies its dummy timing. */
     const uint8_t status = load_page(page);
 
     read_cache(0U, buf, len, lines, dummy_bytes);
@@ -429,6 +443,7 @@ ErrStatus spi_nand_quad_page_read(uint32_t page, uint16_t column, uint8_t *buf, 
 static ErrStatus page_program_mode(uint32_t page, uint16_t column, const uint8_t *buf, uint16_t len,
                                    spi_nand_io_mode_t mode)
 {
+    /* Programming supports only the single-line and quad-load opcodes. */
     if(SPI_NAND_IO_SINGLE == mode) {
         return spi_nand_page_program(page, column, buf, len);
     }
@@ -441,6 +456,7 @@ static ErrStatus page_program_mode(uint32_t page, uint16_t column, const uint8_t
 static ErrStatus page_read_mode(uint32_t page, uint16_t column, uint8_t *buf, uint16_t len,
                                 spi_nand_io_mode_t mode)
 {
+    /* Dual reads are sampled through the MCU's quad receiver in the low-level routine. */
     if(SPI_NAND_IO_SINGLE == mode) {
         return spi_nand_page_read(page, column, buf, len);
     }
@@ -460,6 +476,7 @@ static ErrStatus validate_data_range(uint32_t address, uint32_t len)
     if(NULL == nand_info) {
         return ERROR;
     }
+    /* Subtract only after checking address to avoid unsigned underflow. */
     capacity = (uint32_t)nand_info->block_count * nand_info->pages_per_block * nand_info->page_size;
     return ((address <= capacity) && (len <= capacity - address)) ? SUCCESS : ERROR;
 }
@@ -471,6 +488,7 @@ ErrStatus spi_nand_program_data(uint32_t address, const uint8_t *buf, uint32_t l
         return ERROR;
     }
 
+    /* Split the byte range at page boundaries; erase and bad-block policy stay with the caller. */
     while(len > 0U) {
         const uint32_t page_size = nand_info->page_size;
         const uint32_t page = address / page_size;
@@ -497,6 +515,7 @@ ErrStatus spi_nand_read_data(uint32_t address, uint8_t *buf, uint32_t len, spi_n
         return ERROR;
     }
 
+    /* Split the byte range at page boundaries without adding software block remapping. */
     while(len > 0U) {
         const uint32_t page_size = nand_info->page_size;
         const uint32_t page = address / page_size;
