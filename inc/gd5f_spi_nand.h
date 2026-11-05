@@ -108,6 +108,8 @@ ErrStatus spi_nand_block_erase(uint32_t block);
 ErrStatus spi_nand_erase_blocks(uint32_t first_block, uint32_t block_count);
 /* SUCCESS: block is good; ERROR: bad marker found or marker read/configuration failed */
 ErrStatus spi_nand_block_check_bad(uint32_t block);
+/* Persist 00h in each configured OOB marker page without erasing main data; caller must serialize NAND access. */
+ErrStatus spi_nand_block_mark_bad(uint32_t block);
 /* Program one page at a column offset; caller must erase first and honor per-device partial-program limits. */
 ErrStatus spi_nand_page_program(uint32_t page, uint16_t column, const uint8_t *buf, uint16_t len);
 /* Same page-program operation using four data lines. */

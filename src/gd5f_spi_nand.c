@@ -1,5 +1,6 @@
 #include "gd5f_spi_nand.h"
 #include "gd5f_spi_nand_internal.h"
+#include "gd5f_spi_nand_cr.h"
 #include <stddef.h>
 
 #define CMD_RESET               0xFFU
@@ -307,6 +308,65 @@ ErrStatus spi_nand_block_check_bad(uint32_t block)
     return result;
 }
 
+ErrStatus spi_nand_block_mark_bad(uint32_t block)
+{
+    uint8_t saved_feature;
+    uint8_t program_feature;
+    uint8_t restore_mask;
+    const uint8_t bad_marker = 0x00U;
+    ErrStatus result = SUCCESS;
+
+    if((NULL == nand_info) || (block >= nand_info->block_count) ||
+       (0U == nand_info->bad_block_marker_count) ||
+       ((uint32_t)nand_info->bad_block_marker_page + nand_info->bad_block_marker_count > nand_info->pages_per_block) ||
+       (nand_info->bad_block_marker_offset >= nand_info->spare_size) ||
+       (spi_nand_wait_ready_internal() & SPI_NAND_STAT_OIP)) {
+        return ERROR;
+    }
+
+    saved_feature = spi_nand_get_feature(SPI_NAND_REG_FEATURE);
+    if(saved_feature & SPI_NAND_FEAT_OTP_EN) {
+        return ERROR;
+    }
+
+    /* OOB marker programming uses raw data and must run in Normal Read mode. */
+    program_feature = saved_feature & SPI_NAND_FEAT_RW_MASK;
+    program_feature &= (uint8_t)~SPI_NAND_FEAT_ECC_EN;
+    if(nand_info->cont_read) {
+        program_feature |= SPI_NAND_CR_FEAT_NR;
+    }
+    restore_mask = SPI_NAND_FEAT_ECC_EN | (nand_info->cont_read ? SPI_NAND_CR_FEAT_NR : 0U);
+    spi_nand_set_feature(SPI_NAND_REG_FEATURE, program_feature);
+    if((spi_nand_wait_ready_internal() & SPI_NAND_STAT_OIP) ||
+       ((spi_nand_get_feature(SPI_NAND_REG_FEATURE) & restore_mask) != (program_feature & restore_mask))) {
+        result = ERROR;
+    }
+
+    for(uint32_t index = 0U; (SUCCESS == result) && (index < nand_info->bad_block_marker_count); index++) {
+        const uint32_t page = block * nand_info->pages_per_block + nand_info->bad_block_marker_page + index;
+        const uint16_t column = (uint16_t)(nand_info->page_size + nand_info->bad_block_marker_offset);
+        uint8_t marker = 0xFFU;
+
+        if(ERROR == spi_nand_page_read(page, column, &marker, 1U)) {
+            result = ERROR;
+        } else if(0xFFU == marker) {
+            if((ERROR == spi_nand_page_program(page, column, &bad_marker, 1U)) ||
+               (ERROR == spi_nand_page_read(page, column, &marker, 1U)) ||
+               (bad_marker != marker)) {
+                result = ERROR;
+            }
+        }
+    }
+
+    spi_nand_set_feature(SPI_NAND_REG_FEATURE, saved_feature & SPI_NAND_FEAT_RW_MASK);
+    if((spi_nand_wait_ready_internal() & SPI_NAND_STAT_OIP) ||
+       ((spi_nand_get_feature(SPI_NAND_REG_FEATURE) & SPI_NAND_FEAT_RW_MASK) !=
+        (saved_feature & SPI_NAND_FEAT_RW_MASK))) {
+        result = ERROR;
+    }
+    return result;
+}
+
 static ErrStatus page_program(uint32_t page, uint16_t column, const uint8_t *buf, uint16_t len, uint8_t quad)
 {
     /* Load cache data first, then execute the page program at the requested row. */
@@ -342,6 +402,21 @@ static uint8_t load_page(uint32_t page)
     send_row_address(page);
     CS_HIGH();
     return spi_nand_wait_ready_internal();
+}
+
+static ErrStatus check_page_ecc(uint32_t page, uint8_t status)
+{
+    const uint8_t ecc_status = status & SPI_NAND_STAT_ECCS_MASK;
+
+    if(status & SPI_NAND_STAT_OIP) {
+        return ERROR;
+    }
+    if((spi_nand_get_feature(SPI_NAND_REG_FEATURE) & SPI_NAND_FEAT_ECC_EN) &&
+       spi_nand_ecc_requires_bad_mark(status, nand_info->cont_read)) {
+        (void)spi_nand_block_mark_bad(page / nand_info->pages_per_block);
+        return ERROR;
+    }
+    return (SPI_NAND_STAT_ECCS_UNCORR == ecc_status) ? ERROR : SUCCESS;
 }
 
 /* lines: 1 = single (03h), 2 = dual (3Bh), 4 = quad (6Bh) */
@@ -394,13 +469,14 @@ static void read_cache(uint16_t column, uint8_t *buf, uint32_t len, uint8_t line
 
 ErrStatus spi_nand_read_lines(uint32_t page, uint16_t column, uint8_t *buf, uint32_t len, uint8_t lines)
 {
-    /* Cache data is still drained on read completion; report timeout/ECC afterward. */
     const uint8_t status = load_page(page);
 
+    /* Reject invalid data before exposing bytes from the page cache to the caller. */
+    if(ERROR == check_page_ecc(page, status)) {
+        return ERROR;
+    }
     read_cache(column, buf, len, lines, 0U);
-
-    return ((status & SPI_NAND_STAT_OIP) ||
-            ((status & SPI_NAND_STAT_ECCS_MASK) == SPI_NAND_STAT_ECCS_UNCORR)) ? ERROR : SUCCESS;
+    return SUCCESS;
 }
 
 ErrStatus spi_nand_read_continuous_lines(uint32_t page, uint8_t *buf, uint32_t len,
@@ -409,10 +485,11 @@ ErrStatus spi_nand_read_continuous_lines(uint32_t page, uint8_t *buf, uint32_t l
     /* Continuous Read omits the column address; the feature module supplies its dummy timing. */
     const uint8_t status = load_page(page);
 
+    if(ERROR == check_page_ecc(page, status)) {
+        return ERROR;
+    }
     read_cache(0U, buf, len, lines, dummy_bytes);
-
-    return ((status & SPI_NAND_STAT_OIP) ||
-            ((status & SPI_NAND_STAT_ECCS_MASK) == SPI_NAND_STAT_ECCS_UNCORR)) ? ERROR : SUCCESS;
+    return SUCCESS;
 }
 
 ErrStatus spi_nand_page_program(uint32_t page, uint16_t column, const uint8_t *buf, uint16_t len)

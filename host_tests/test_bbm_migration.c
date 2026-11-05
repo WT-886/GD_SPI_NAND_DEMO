@@ -253,6 +253,17 @@ static void check_case(const char *name, ErrStatus result, unsigned int commits)
     printf("PASS: %s (fault=%u)\n", name, (unsigned int)fault);
 }
 
+static void check_ecc_bad_block_threshold(void)
+{
+    assert(0U == spi_nand_ecc_requires_bad_mark(0U, 1U));
+    assert(0U == spi_nand_ecc_requires_bad_mark(BIT(4), 1U));
+    assert(1U == spi_nand_ecc_requires_bad_mark(SPI_NAND_STAT_ECCS_UNCORR, 0U));
+    assert(1U == spi_nand_ecc_requires_bad_mark(SPI_NAND_STAT_ECCS_UNCORR, 1U));
+    assert(0U == spi_nand_ecc_requires_bad_mark(SPI_NAND_STAT_ECCS_MASK, 0U));
+    assert(1U == spi_nand_ecc_requires_bad_mark(SPI_NAND_STAT_ECCS_MASK, 1U));
+    printf("PASS: ECC 8-bit/uncorrectable bad-block thresholds\n");
+}
+
 int main(void)
 {
     /* Success cases cover first mapping, remapping the current visible source, and historical PBA reuse. */
@@ -319,6 +330,7 @@ int main(void)
     assert(ERROR == spi_nand_bbm_replace(SOURCE_BLOCK, TEST_BLOCKS));
     assert(0U == erase_count);
     assert(0U == a1_count);
+    check_ecc_bad_block_threshold();
     printf("%u migration scenarios plus 3 address checks passed\n", cases);
     return 0;
 }
