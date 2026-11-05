@@ -1,13 +1,14 @@
 # GD32F450 SPI NAND 开发与验证项目
 
 版本基线：**v1.0.0**；当前开发分支：**feature/bbm-safe-migration**。文档更新：**2026-11-05**。
+作者 / Flash FAE：[teng.wu@gigadevice.com](mailto:teng.wu@gigadevice.com)。
 目标为 GD32450Z-EVAL / GD32F450ZKT6，基于 GD32F4xx 标准外设库 V3.3.3、CMSIS 和 Arm GNU Toolchain，使用 CMake/Ninja 构建。
 这是裸机驱动与验证工程，不是文件系统或完整 FTL。项目主要借助 AI 协作开发；后续开发应以源码、手册和可重复的验证结果为依据。
 
 ## 运行前必读
 
 - 当前 `NAND_BBM_ONLY_TEST=0U`、`NAND_FULL_TEST_ENABLE=0U`：运行固件会擦写块 1～5，不运行全片测试，然后执行 BBM demo。
-- BBM demo 当前候选为 `LBA 8 -> PBA 1011`，执行开关为 `1U`。候选检查通过后会先迁移并校验主区数据，再发送 A1h；映射保存在 NAND 内并消耗内部表项。该候选是本次硬件测试配置，不代表其他芯片的现状。
+- BBM demo 当前候选为 `LBA 8 -> PBA 1011`，执行开关为 `0U`，只读表和检查候选，不会擦除目标或发送 A1h。启用执行后才会先迁移并校验主区数据，再建立持久映射并消耗内部表项。该候选是本次硬件测试配置，不代表其他芯片的现状。
 - A1h 命令本身**不会搬运数据**。当前分支的 BBM 替换接口会先擦除目标、迁移并校验主区数据，再发送 A1h。不要把反复运行 demo 当作无副作用操作。
 - 本文不是对任意 NAND 或接线的兼容保证。首次部署应先阅读测试入口、调整开关，再考虑下载和继续执行。
 
@@ -94,7 +95,7 @@ cmake --build --preset Debug
 | `main.c` | `NAND_BBM_ONLY_TEST=0U` | `0U` 运行五块 demo；`1U` 跳过五块和全片测试，只运行 BBM demo |
 | `main.c` | `NAND_FULL_TEST_ENABLE=0U` | 当前关闭全片破坏性测试；设为 `1U` 会擦写所有通过标记检查的块 |
 | `main.c` | `NAND_FULL_TEST_IO_MODE=SPI_NAND_IO_QUAD` | 全片写入方式，随后校验单线/四线普通读及支持的 CR |
-| `gd5f_spi_nand_bbm.c` | `SPI_NAND_BBM_DEMO_EXECUTE=1U` | 候选合法时允许发送持久 A1h；设为 `0U` 只做读取与候选检查 |
+| `gd5f_spi_nand_bbm.c` | `SPI_NAND_BBM_DEMO_EXECUTE=0U` | 当前 dry-run，只读取 A5h 和检查候选；设为 `1U` 才会迁移数据并尝试发送持久 A1h |
 | `gd5f_spi_nand_bbm.c` | `SPI_NAND_BBM_DEMO_LBA=8U`、`SPI_NAND_BBM_DEMO_PBA=1011U` | 当前硬件验证候选，不代表目标块数据可丢弃 |
 
 只想查看映射表时，必须同时禁用/跳过五块 demo、关闭全片测试，并关闭 BBM 执行。仅关闭全片测试不是只读模式。
@@ -120,20 +121,20 @@ cmake --build --preset Debug
 - 源页报告现有驱动可识别的不可纠正 ECC 错误时会中止；计划第 2 项的 ECC 统计、阈值、运行时坏块判定及数据抢救尚未实现，不会在本阶段自动标坏。
 - `NAND_BBM_ONLY_TEST=0U` 时 `main` 先运行会擦写块 1～5 的 demo，再运行 BBM；全片测试另外由 `NAND_FULL_TEST_ENABLE` 控制。验证真实业务数据前，应设 BBM-only 模式，避免源数据先被测试覆盖。
 
-### 无硬件回归测试
+### 主机模拟回归测试（`host_tests/`）
 
-[tests/test_bbm_migration.c](tests/test_bbm_migration.c) 使用模拟 NAND 链接真实 BBM 实现，覆盖首次映射、已有映射的数据搬移、历史目标复用、错误模式/几何、坏块和表容量、映射冲突、复制/校验失败、提交前表变化以及 A1h 结果不确定等情况。测试桩不参与固件构建。
+[host_tests/test_bbm_migration.c](host_tests/test_bbm_migration.c) 使用模拟 NAND 链接真实 BBM 实现，覆盖首次映射、已有映射的数据搬移、历史目标复用、错误模式/几何、坏块和表容量、映射冲突、复制/校验失败、提交前表变化以及 A1h 结果不确定等情况。它是主机侧模拟测试，不是 `src/` 中运行在 MCU 上的硬件测试；测试桩不参与固件构建。
 
 在已配置原生 Clang 或 GCC 的主机上，从根目录编译并运行，例如 Windows PowerShell：
 
 ```powershell
-clang -std=c11 -Wall -Wextra -Werror -Itests/stubs -Iinc tests/test_bbm_migration.c src/gd5f_spi_nand_bbm.c -o build/bbm_migration_test.exe
+clang -std=c11 -Wall -Wextra -Werror -Ihost_tests/stubs -Iinc host_tests/test_bbm_migration.c src/gd5f_spi_nand_bbm.c -o build/bbm_migration_test.exe
 ./build/bbm_migration_test.exe
 ```
 
 本机 WSL Ubuntu 24.04 / GCC 13.3 已运行该模拟测试：33 个迁移/故障场景与 3 个地址检查全部通过。模拟测试不能证明真实 NAND 的时序、ECC 或掉电一致性。
 
-GD5F1GM9 硬件实测中，A5h 表新增有效映射 `LBA 8 -> PBA 1011`，空闲 link 从 15 降至 14；固件流程只会在主区复制及回读比较通过后发送 A1h。此结果仅适用于当时的芯片和状态，不替代其他设备的验证。
+GD5F1GM9 硬件实测中，A5h 表新增有效映射 `LBA 8 -> PBA 1011`，空闲 link 从 15 降至 14；当时执行开关开启，固件在主区复制及回读比较通过后发送了 A1h。此结果仅适用于当时的芯片和状态，不替代其他设备的验证。
 
 ## NAND 与 BBM 开发约束
 
