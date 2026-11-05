@@ -83,7 +83,7 @@ set(INC_DIRS
 # 可在此追加头文件路径，例如 list(APPEND INC_DIRS ${CMAKE_SOURCE_DIR}/my_inc)
 # ---- [mcudeva:user] END includes ----
 
-# ==== [mcudeva:auto] BEGIN sources (hash:43357a8f) ====
+# ==== [mcudeva:auto] BEGIN sources (hash:7c9f039e) ====
 # 源文件列表
 set(SOURCES)
 file(GLOB_RECURSE SOURCE_GLOB_0 CONFIGURE_DEPENDS
@@ -112,12 +112,19 @@ file(GLOB_RECURSE SOURCE_GLOB_3 CONFIGURE_DEPENDS
 list(REVERSE SOURCE_GLOB_3)
 list(APPEND SOURCES ${SOURCE_GLOB_3})
 
+file(GLOB_RECURSE SOURCE_GLOB_4 CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/tests/*.c"
+)
+list(REVERSE SOURCE_GLOB_4)
+list(APPEND SOURCES ${SOURCE_GLOB_4})
+
 # ==== [mcudeva:auto] END sources ====
 
 # ---- [mcudeva:user] BEGIN sources — 用户自定义区，重新生成时保留，可自由修改 ----
 # 可在此增删源文件，例如 list(APPEND SOURCES ${CMAKE_SOURCE_DIR}/my/extra.c)
 # GD32H759 reference code, kept for reading only
 list(FILTER SOURCES EXCLUDE REGEX "/src/continuous_read/")
+list(FILTER SOURCES EXCLUDE REGEX "/tests/")
 # ---- [mcudeva:user] END sources ----
 
 # ==== [mcudeva:auto] BEGIN target (hash:57a9b457) ====

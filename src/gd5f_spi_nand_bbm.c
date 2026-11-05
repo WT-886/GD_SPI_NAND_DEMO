@@ -2,6 +2,7 @@
 #include "gd5f_spi_nand_internal.h"
 #include "gd5f_spi_nand_cr.h"
 #include <stdio.h>
+#include <string.h>
 
 #define CMD_WRITE_ENABLE             0x06U
 #define CMD_WRITE_BBM                0xA1U
@@ -10,10 +11,10 @@
 
 /* v1.0.0 demo: execution is enabled and may consume a persistent BBM link. */
 #ifndef SPI_NAND_BBM_DEMO_LBA
-#define SPI_NAND_BBM_DEMO_LBA        7U
+#define SPI_NAND_BBM_DEMO_LBA        8U
 #endif
 #ifndef SPI_NAND_BBM_DEMO_PBA
-#define SPI_NAND_BBM_DEMO_PBA        1010U
+#define SPI_NAND_BBM_DEMO_PBA        1011U
 #endif
 #ifndef SPI_NAND_BBM_DEMO_EXECUTE
 #define SPI_NAND_BBM_DEMO_EXECUTE    1U     // 1=ON  0=OFF
@@ -24,22 +25,60 @@ static ErrStatus validate_candidate(uint16_t lba, uint16_t pba,
 {
     const spi_nand_info_t *nand = spi_nand_get_info();
     uint8_t available = 0U;
+     uint8_t source_links = 0U;
 
     if((NULL == nand) || !nand->bbm_supported || (lba >= nand->block_count) ||
-       (pba >= nand->block_count) || (lba == pba) || links_full ||
-       (ERROR == spi_nand_block_check_bad(pba))) {
+         (pba >= nand->block_count) || (lba == pba) || links_full) {
         return ERROR;
     }
 
     for(uint32_t i = 0U; i < SPI_NAND_BBM_LINK_COUNT; i++) {
         if(SPI_NAND_BBM_LINK_AVAILABLE == links[i].status) {
             available++;
+        } else if((SPI_NAND_BBM_LINK_VALID != links[i].status) &&
+                  (SPI_NAND_BBM_LINK_INVALID != links[i].status)) {
+            return ERROR;
         } else if((SPI_NAND_BBM_LINK_VALID == links[i].status) &&
-                  ((pba == links[i].pba) || (pba == links[i].lba))) {
+                  ((pba == links[i].pba) || (pba == links[i].lba) ||
+                   (lba == links[i].pba))) {
+            return ERROR;
+        }
+        if((SPI_NAND_BBM_LINK_VALID == links[i].status) && (lba == links[i].lba)) {
+            source_links++;
+            if(source_links > 1U) {
+                return ERROR;
+            }
+        }
+    }
+    return (available && (SUCCESS == spi_nand_block_check_bad(pba))) ? SUCCESS : ERROR;
+}
+
+static ErrStatus migrate_block(uint16_t lba, uint16_t pba, const spi_nand_info_t *nand)
+{
+    static uint8_t source_data[SPI_NAND_MAX_PAGE_SIZE];
+    static uint8_t verify_data[SPI_NAND_MAX_PAGE_SIZE];
+    const uint32_t source_page = (uint32_t)lba * nand->pages_per_block;
+    const uint32_t target_page = (uint32_t)pba * nand->pages_per_block;
+
+    if(ERROR == spi_nand_block_erase(pba)) {
+        return ERROR;
+    }
+
+    for(uint32_t page = 0U; page < nand->pages_per_block; page++) {
+        if((ERROR == spi_nand_page_read(source_page + page, 0U, source_data, nand->page_size)) ||
+           (ERROR == spi_nand_page_program(target_page + page, 0U, source_data, nand->page_size))) {
             return ERROR;
         }
     }
-    return available ? SUCCESS : ERROR;
+
+    for(uint32_t page = 0U; page < nand->pages_per_block; page++) {
+        if((ERROR == spi_nand_page_read(source_page + page, 0U, source_data, nand->page_size)) ||
+           (ERROR == spi_nand_page_read(target_page + page, 0U, verify_data, nand->page_size)) ||
+           (0 != memcmp(source_data, verify_data, nand->page_size))) {
+            return ERROR;
+        }
+    }
+    return SUCCESS;
 }
 
 ErrStatus spi_nand_bbm_read_links(spi_nand_bbm_link_t *links, uint8_t *links_full)
@@ -71,15 +110,45 @@ ErrStatus spi_nand_bbm_read_links(spi_nand_bbm_link_t *links, uint8_t *links_ful
 
 ErrStatus spi_nand_bbm_replace(uint16_t lba, uint16_t pba)
 {
+    const spi_nand_info_t *nand = spi_nand_get_info();
     spi_nand_bbm_link_t links[SPI_NAND_BBM_LINK_COUNT];
+    spi_nand_bbm_link_t checked_links[SPI_NAND_BBM_LINK_COUNT];
     uint8_t links_full;
     uint8_t wel;
     uint8_t command_data[4];
     uint8_t status;
+    uint8_t feature;
+    uint8_t matching_links = 0U;
+
+    if((NULL == nand) || !nand->bbm_supported || (0U == nand->page_size) ||
+       (nand->page_size > SPI_NAND_MAX_PAGE_SIZE) || (0U == nand->pages_per_block) ||
+       (spi_nand_wait_ready_internal() & SPI_NAND_STAT_OIP)) {
+        return ERROR;
+    }
+    feature = spi_nand_get_feature(SPI_NAND_REG_FEATURE);
+    if((0U == (feature & SPI_NAND_FEAT_ECC_EN)) || (feature & SPI_NAND_FEAT_OTP_EN) ||
+       (nand->cont_read && (0U == (feature & SPI_NAND_CR_FEAT_NR)))) {
+        return ERROR;
+    }
 
     if(ERROR == spi_nand_bbm_read_links(links, &links_full) ||
        ERROR == validate_candidate(lba, pba, links, links_full)) {
         return ERROR;
+    }
+
+    if(ERROR == migrate_block(lba, pba, nand)) {
+        return ERROR;
+    }
+    if(ERROR == spi_nand_bbm_read_links(checked_links, &links_full) ||
+       ERROR == validate_candidate(lba, pba, checked_links, links_full)) {
+        return ERROR;
+    }
+    for(uint32_t index = 0U; index < SPI_NAND_BBM_LINK_COUNT; index++) {
+        if((links[index].status != checked_links[index].status) ||
+           (links[index].lba != checked_links[index].lba) ||
+           (links[index].pba != checked_links[index].pba)) {
+            return ERROR;
+        }
     }
 
     if(ERROR == spi_nand_command_transfer(CMD_WRITE_ENABLE, NULL, 0U, NULL, 0U)) {
@@ -99,7 +168,7 @@ ErrStatus spi_nand_bbm_replace(uint16_t lba, uint16_t pba)
     }
 
     status = spi_nand_wait_ready_internal();
-    if(status & SPI_NAND_STAT_OIP) {
+    if(status & (SPI_NAND_STAT_OIP | SPI_NAND_STAT_P_FAIL)) {
         return ERROR;
     }
     if(ERROR == spi_nand_bbm_read_links(links, &links_full)) {
@@ -107,12 +176,14 @@ ErrStatus spi_nand_bbm_replace(uint16_t lba, uint16_t pba)
     }
 
     for(uint32_t i = 0U; i < SPI_NAND_BBM_LINK_COUNT; i++) {
-        if((SPI_NAND_BBM_LINK_VALID == links[i].status) &&
-           (lba == links[i].lba) && (pba == links[i].pba)) {
-            return SUCCESS;
+        if((SPI_NAND_BBM_LINK_VALID == links[i].status) && (lba == links[i].lba)) {
+            if(pba != links[i].pba) {
+                return ERROR;
+            }
+            matching_links++;
         }
     }
-    return ERROR;
+    return (1U == matching_links) ? SUCCESS : ERROR;
 }
 
 static void print_link_table(const spi_nand_bbm_link_t *links, uint8_t links_full)
@@ -148,7 +219,8 @@ void spi_nand_bbm_demo(void)
 
     print_link_table(links, links_full);
     printf("Candidate: LBA %u -> PBA %u\r\n", SPI_NAND_BBM_DEMO_LBA, SPI_NAND_BBM_DEMO_PBA);
-    printf("A1h updates block mapping only; back up/migrate data separately\r\n");
+    printf("BBM: check target, erase/copy main data, verify, then commit A1h\r\n");
+    printf("Target data will be erased; OOB is not copied; exclusive NAND access required\r\n");
 
     if(ERROR == validate_candidate(SPI_NAND_BBM_DEMO_LBA, SPI_NAND_BBM_DEMO_PBA, links, links_full)) {
         printf("Candidate invalid; no A1h command sent\r\n");
@@ -156,14 +228,19 @@ void spi_nand_bbm_demo(void)
     }
 
 #if SPI_NAND_BBM_DEMO_EXECUTE
-    printf("A1h result: %s\r\n",
-           (SUCCESS == spi_nand_bbm_replace(SPI_NAND_BBM_DEMO_LBA, SPI_NAND_BBM_DEMO_PBA)) ? "PASS" : "FAIL");
-    printf("Status after A1h attempt: 0x%02X\r\n", spi_nand_get_feature(SPI_NAND_REG_STATUS));
+    const ErrStatus result = spi_nand_bbm_replace(SPI_NAND_BBM_DEMO_LBA, SPI_NAND_BBM_DEMO_PBA);
+
+    printf("BBM migration/map result: %s\r\n",
+           (SUCCESS == result) ? "PASS" : "FAIL");
+    if(ERROR == result) {
+        printf("Failure may precede A1h or leave its outcome unknown; inspect A5h\r\n");
+    }
+    printf("Status after BBM attempt: 0x%02X\r\n", spi_nand_get_feature(SPI_NAND_REG_STATUS));
     if(ERROR == spi_nand_bbm_read_links(links, &links_full)) {
-        printf("BBM: link-table read after A1h attempt failed\r\n");
+        printf("BBM: link-table read after BBM attempt failed\r\n");
         return;
     }
-    printf("BBM: A5h readback after A1h attempt\r\n");
+    printf("BBM: A5h readback after migration/map attempt\r\n");
     print_link_table(links, links_full);
 #else
     printf("Dry-run only; set SPI_NAND_BBM_DEMO_EXECUTE=1 to issue A1h\r\n");
