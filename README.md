@@ -1,14 +1,14 @@
 # GD32F450 SPI NAND 开发与验证项目
 
-项目版本：**v1.0.0**。文档更新：**2026-11-04**。
+版本基线：**v1.0.0**；当前开发分支：**feature/bbm-safe-migration**。文档更新：**2026-11-05**。
 目标为 GD32450Z-EVAL / GD32F450ZKT6，基于 GD32F4xx 标准外设库 V3.3.3、CMSIS 和 Arm GNU Toolchain，使用 CMake/Ninja 构建。
 这是裸机驱动与验证工程，不是文件系统或完整 FTL。项目主要借助 AI 协作开发；后续开发应以源码、手册和可重复的验证结果为依据。
 
 ## 运行前必读
 
-- 当前所有现有测试均开启。运行固件会擦写块 1～5，随后全片随机测试会擦写通过检查的所有块，原有业务数据将丢失。
-- BBM demo 当前候选为 `LBA 7 -> PBA 1010`，执行开关为 `1U`。候选检查通过后会发送 A1h，建立掉电保留的映射并消耗内部表项。
-- A1h **不会搬运数据**。它不是普通 RAM 配置，不要把反复运行 demo 当作无副作用操作。
+- 当前 `NAND_BBM_ONLY_TEST=0U`、`NAND_FULL_TEST_ENABLE=0U`：运行固件会擦写块 1～5，不运行全片测试，然后执行 BBM demo。
+- BBM demo 当前候选为 `LBA 8 -> PBA 1011`，执行开关为 `1U`。候选检查通过后会先迁移并校验主区数据，再发送 A1h；映射保存在 NAND 内并消耗内部表项。该候选是本次硬件测试配置，不代表其他芯片的现状。
+- A1h 命令本身**不会搬运数据**。当前分支的 BBM 替换接口会先擦除目标、迁移并校验主区数据，再发送 A1h。不要把反复运行 demo 当作无副作用操作。
 - 本文不是对任意 NAND 或接线的兼容保证。首次部署应先阅读测试入口、调整开关，再考虑下载和继续执行。
 
 ## 硬件与接线
@@ -40,6 +40,8 @@
 | --- | --- | --- | --- | --- |
 | GD5F1GM9 | `C8 91` | 1 Gb / 128 MiB | 1024 块，每块 64 页，每页 2048+128 B | Continuous Read、A1h/A5h BBM |
 | GD5F4GQ6 | `C8 55` | 4 Gb / 512 MiB | 4096 块，每块 64 页，每页 2048+128 B | 普通单/双/四线驱动接口；当前器件表未启用 CR/BBM |
+
+在本项目当前支持的器件中，**Continuous Read 和 A1h/A5h BBM 是 GD5F1GM9 专属启用的功能**，不是所有 GD5F SPI NAND 共通的驱动能力。GD5F4GQ6 及其他型号不得假设支持；加入支持前须核对对应 datasheet，并单独验证寄存器布局、命令和时序。
 
 器件参数来源是 [src/gd5f_spi_nand.c](src/gd5f_spi_nand.c) 中的 `nand_table[]`。未知 ID 会返回通用 1 Gb 几何作为 fallback，**不等于已支持该器件**；全片测试会拒绝 `unknown`，但较早的五块 demo 仍有写操作，因此换芯片前必须先核对型号并调整测试入口。
 
@@ -75,10 +77,10 @@ cmake --build --preset Debug
 
 | 入口 / 模块 | 职责 |
 | --- | --- |
-| [src/main.c](src/main.c) | 初始化串口、DWT 计时和 NAND；五块 demo、全片测试、BBM demo 按顺序运行 |
+| [src/main.c](src/main.c) | 初始化串口、DWT 计时和 NAND；依测试开关运行五块 demo、全片测试及 BBM demo |
 | [src/gd5f_spi_nand.c](src/gd5f_spi_nand.c) / [inc/gd5f_spi_nand.h](inc/gd5f_spi_nand.h) | 器件识别、SPI 传输、坏块标记、页与连续字节范围的擦写读接口 |
 | [src/gd5f_spi_nand_cr.c](src/gd5f_spi_nand_cr.c) / [inc/gd5f_spi_nand_cr.h](inc/gd5f_spi_nand_cr.h) | GM9 Continuous Read 配置和单/四线连续读 |
-| [src/gd5f_spi_nand_bbm.c](src/gd5f_spi_nand_bbm.c) / [inc/gd5f_spi_nand_bbm.h](inc/gd5f_spi_nand_bbm.h) | A5h 解析、候选检查、A1h 替换和前后表格输出 |
+| [src/gd5f_spi_nand_bbm.c](src/gd5f_spi_nand_bbm.c) / [inc/gd5f_spi_nand_bbm.h](inc/gd5f_spi_nand_bbm.h) | A5h 解析、目标检查、主区迁移/校验、A1h 提交和前后表格输出 |
 | [src/gd5f_spi_nand_full_test.c](src/gd5f_spi_nand_full_test.c) | 先扫描坏块标记，再擦除、伪随机写入、普通读与 CR 校验 |
 | [src/gd32f450i_eval.c](src/gd32f450i_eval.c) | 串口及开发板外设适配 |
 | [gcc_startup/startup_gd32f450_470.S](gcc_startup/startup_gd32f450_470.S) | 启动及中断向量 |
@@ -89,12 +91,49 @@ cmake --build --preset Debug
 | 位置 | 配置 | 作用 |
 | --- | --- | --- |
 | `main.c` | `NAND_TEST_BLOCK=1U`、`NAND_TEST_BLOCK_COUNT=5U` | 五块擦写、普通读、单/四线 CR 及耗时统计；`nand_demo()` 无独立使能宏 |
-| `main.c` | `NAND_FULL_TEST_ENABLE=1U` | 开启全片破坏性测试；设为 `0U` 只关闭这一项，不关闭五块 demo |
+| `main.c` | `NAND_BBM_ONLY_TEST=0U` | `0U` 运行五块 demo；`1U` 跳过五块和全片测试，只运行 BBM demo |
+| `main.c` | `NAND_FULL_TEST_ENABLE=0U` | 当前关闭全片破坏性测试；设为 `1U` 会擦写所有通过标记检查的块 |
 | `main.c` | `NAND_FULL_TEST_IO_MODE=SPI_NAND_IO_QUAD` | 全片写入方式，随后校验单线/四线普通读及支持的 CR |
 | `gd5f_spi_nand_bbm.c` | `SPI_NAND_BBM_DEMO_EXECUTE=1U` | 候选合法时允许发送持久 A1h；设为 `0U` 只做读取与候选检查 |
-| `gd5f_spi_nand_bbm.c` | `SPI_NAND_BBM_DEMO_LBA=7U`、`SPI_NAND_BBM_DEMO_PBA=1010U` | 当前 BBM demo 候选，不代表芯片实际已有映射 |
+| `gd5f_spi_nand_bbm.c` | `SPI_NAND_BBM_DEMO_LBA=8U`、`SPI_NAND_BBM_DEMO_PBA=1011U` | 当前硬件验证候选，不代表目标块数据可丢弃 |
 
 只想查看映射表时，必须同时禁用/跳过五块 demo、关闭全片测试，并关闭 BBM 执行。仅关闭全片测试不是只读模式。
+
+## BBM 安全迁移开发
+
+当前分支实现计划第 1 项，保留 `spi_nand_bbm_replace(lba, pba)` 接口，但不再只修改映射表：
+
+1. 检查设备支持、几何、就绪状态，要求普通读模式、ECC 开启且不在 OTP 模式。检查失败直接返回 ERROR，不自动切换工作模式。
+2. 读取真实 A5h 表，检查地址、空闲表项、保留状态及有效映射冲突，再检查目标坏块标记。目标坏块或标记读取失败均拒绝迁移。源 LBA 可以已映射，但不能是其他有效映射的替换 PBA，也不能有多个有效源映射。
+3. 擦除目标 PBA，按页读取当前 LBA 的主数据区，并编程到目标。已有映射由芯片处理，因此重映射时复制的是当前可见数据，不是最初的原始物理块。
+4. 完成整块复制后，重新读取源和目标的全部主区数据并逐字节比较。任意读错、编程失败或不一致都不发送 A1h。
+5. 重新检查目标标记及 A5h 表，要求整张表与开始时一致。然后 WREN、确认 WEL、提交 A1h、等待完成，并用 A5h 确认该 LBA 只有一条指向目标的有效映射。
+
+调用约束与原子性边界：
+
+- 目标必须由调用者预留、可独立寻址且允许丢弃原数据。接口会擦除目标；无法自动判断它是否存有业务数据。历史 PBA 的独立寻址能力仍需按芯片行为确认，复用仍属实验。
+- 必须独占 NAND，禁止其他任务或中断在调用期间修改数据、寄存器、映射或发起其他 NAND 操作。两个静态页缓冲共增加约 8 KiB RAM，不可重入。
+- 本次只保留主数据区。OOB 元数据、工厂坏块标记和原 ECC 字节不直接复制；新页由片内 ECC 重新生成校验信息。使用 OOB 存业务元数据的上层不能直接将此接口视作完整备份。
+- A1h 前失败时，源数据和本接口建立的映射保持不变，但目标可能已擦除或只写了一部分，不能再视为原数据副本。
+- A1h 已发出后若超时、传输失败或回读失败，ERROR **不代表映射一定没发生**。必须重新读取 A5h 和校验数据，不能自动重试、擦除目标或继续消费表项。
+- 当前保证的是“先准备并验证完整副本，后提交映射”的顺序，**不是任意掉电下的严格原子事务**。没有加入持久事务日志、重启恢复或对 A1h 掉电一致性的硬件保证；A1h 期间断电的结果仍需查证与实测。
+- 源页报告现有驱动可识别的不可纠正 ECC 错误时会中止；计划第 2 项的 ECC 统计、阈值、运行时坏块判定及数据抢救尚未实现，不会在本阶段自动标坏。
+- `NAND_BBM_ONLY_TEST=0U` 时 `main` 先运行会擦写块 1～5 的 demo，再运行 BBM；全片测试另外由 `NAND_FULL_TEST_ENABLE` 控制。验证真实业务数据前，应设 BBM-only 模式，避免源数据先被测试覆盖。
+
+### 无硬件回归测试
+
+[tests/test_bbm_migration.c](tests/test_bbm_migration.c) 使用模拟 NAND 链接真实 BBM 实现，覆盖首次映射、已有映射的数据搬移、历史目标复用、错误模式/几何、坏块和表容量、映射冲突、复制/校验失败、提交前表变化以及 A1h 结果不确定等情况。测试桩不参与固件构建。
+
+在已配置原生 Clang 或 GCC 的主机上，从根目录编译并运行，例如 Windows PowerShell：
+
+```powershell
+clang -std=c11 -Wall -Wextra -Werror -Itests/stubs -Iinc tests/test_bbm_migration.c src/gd5f_spi_nand_bbm.c -o build/bbm_migration_test.exe
+./build/bbm_migration_test.exe
+```
+
+本机 WSL Ubuntu 24.04 / GCC 13.3 已运行该模拟测试：33 个迁移/故障场景与 3 个地址检查全部通过。模拟测试不能证明真实 NAND 的时序、ECC 或掉电一致性。
+
+GD5F1GM9 硬件实测中，A5h 表新增有效映射 `LBA 8 -> PBA 1011`，空闲 link 从 15 降至 14；固件流程只会在主区复制及回读比较通过后发送 A1h。此结果仅适用于当时的芯片和状态，不替代其他设备的验证。
 
 ## NAND 与 BBM 开发约束
 
