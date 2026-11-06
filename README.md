@@ -6,7 +6,7 @@
 
 ## 运行前必读
 
-- **当前固件会擦写块 1～5**；独立坏块检查开启，全片擦写关闭，BBM 为 dry-run。关闭全片测试不等于只读。
+- **默认启用定点擦写测试**，运行前应在测试配置头文件中确认范围。关闭全片测试不等于只读。
 - 开启 BBM 执行会擦除目标并建立持久映射，消耗有限表项；A1h 本身不搬运数据。
 - ECC 异常读取可能自动写入 OOB 坏块标记。烧录、复位或继续调试前，先确认测试范围和数据可丢弃。
 
@@ -53,6 +53,7 @@ cmake --build --preset Debug
 
 | 入口 / 模块 | 职责 |
 | --- | --- |
+| [inc/gd5f_spi_nand_test_config.h](inc/gd5f_spi_nand_test_config.h) | 固件测试开关及参数的唯一配置入口 |
 | [src/main.c](src/main.c) | 初始化、测试开关、五块读写与 CR 耗时统计 |
 | [src/gd5f_spi_nand.c](src/gd5f_spi_nand.c) | 通用 SPI、器件表、页/字节接口、ECC 和 OOB 坏块标记 |
 | [src/gd5f_spi_nand_cr.c](src/gd5f_spi_nand_cr.c) | GM9 单/四线 Continuous Read |
@@ -63,18 +64,16 @@ cmake --build --preset Debug
 
 ## 测试开关
 
-| 位置 | 配置 | 作用 |
-| --- | --- | --- |
-| `main.c` | `NAND_BAD_BLOCK_CHECK_ENABLE=1U` | 独立标记检查，不关闭其他 demo |
-| `main.c` | `NAND_BAD_BLOCK_FIRST_BLOCK=0U`、`NAND_BAD_BLOCK_COUNT=0U` | 从起始块检查；块数 `0U` 表示到片尾，`1U` 表示仅检查指定块 |
-| `main.c` | `NAND_TEST_BLOCK=1U`、`NAND_TEST_BLOCK_COUNT=5U` | 五块 demo 的擦写范围 |
-| `main.c` | `NAND_BBM_ONLY_TEST=0U` | 设为 `1U` 跳过五块和全片测试；独立扫描仍受自身开关控制 |
-| `main.c` | `NAND_FULL_TEST_ENABLE=0U` | 设为 `1U` 开启全片破坏性测试 |
-| `main.c` | `NAND_FULL_TEST_IO_MODE=SPI_NAND_IO_QUAD` | 全片写入模式 |
-| `gd5f_spi_nand_bbm.c` | `SPI_NAND_BBM_DEMO_EXECUTE=0U` | dry-run；设为 `1U` 才迁移并发送 A1h |
-| `gd5f_spi_nand_bbm.c` | `SPI_NAND_BBM_DEMO_LBA=511U`、`SPI_NAND_BBM_DEMO_PBA=1012U` | 当前候选，实际占用以 A5h 为准 |
+统一修改 [inc/gd5f_spi_nand_test_config.h](inc/gd5f_spi_nand_test_config.h)，不要在各源文件另设测试宏。块号、范围、I/O 模式、缓冲区大小、随机种子和 BBM 候选都是测试参数，不是芯片固有属性；临时数值无需同步到 README。
 
-只读表/检查时应跳过所有擦写 demo 并关闭 BBM 执行。扫描结果中的 ERROR 也可能是读取失败，不等于确认物理坏块。
+| 测试项 | 独立开关 | 说明 |
+| --- | --- | --- |
+| 坏块标记扫描 | `NAND_BAD_BLOCK_CHECK_ENABLE` | 支持起始块及块数，不擦写数据 |
+| 定点读写与 CR 计时 | `NAND_TIMING_TEST_ENABLE` | 擦写配置的块范围；CR 仅在支持器件上执行 |
+| 全片随机测试 | `NAND_FULL_TEST_ENABLE` | 破坏性擦写全部通过预检的块 |
+| BBM demo | `NAND_BBM_DEMO_ENABLE` | 读取 A5h 及检查候选；还需 `SPI_NAND_BBM_DEMO_EXECUTE` 才迁移和建立映射 |
+
+开关互不隐含控制其他测试，执行顺序为标记扫描、定点测试、全片测试、BBM。只读表/检查时关闭定点、全片测试和 BBM 执行即可，不再使用 BBM-only 模式。扫描 ERROR 也可能是读取失败，不等于确认物理坏块。
 
 ## NAND 注意事项
 
@@ -94,6 +93,6 @@ clang -std=c11 -Wall -Wextra -Werror -Ihost_tests/stubs -Iinc host_tests/test_bb
 ```
 
 - WSL GCC 13.3 已通过 33 个迁移/故障场景、3 个地址检查及 ECC 阈值用例；不验证真实 OOB 编程或掉电一致性。
-- 硬件 A/B 实测：`512 -> 1013` 后，512 改写 B、直接读 1013 仍为 A，支持地址交换式表现的假设，但不保证 PBA 可独立使用；临时实验代码已删除。
+- 硬件 A/B 实测：映射后通过 LBA 改写 B，而直接读取替换地址仍为 A，支持地址交换式表现的假设，但不保证 PBA 可独立使用；临时实验代码已删除。
 - 构建不等于硬件 PASS；在 `debug` 或功能分支开发，文档与代码分开提交，保留厂商版权/SDK 历史，未经授权不烧录、不擦写、不提交或推送。
 - AI 开发规则见 [.github/copilot-instructions.md](.github/copilot-instructions.md)；接线、器件或默认值变化时同步本文，硬件状态以实时读取为准。
