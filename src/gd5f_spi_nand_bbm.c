@@ -11,10 +11,10 @@
 
 /* v1.0.0 demo: execution is enabled and may consume a persistent BBM link. */
 #ifndef SPI_NAND_BBM_DEMO_LBA
-#define SPI_NAND_BBM_DEMO_LBA        8U
+#define SPI_NAND_BBM_DEMO_LBA        511U
 #endif
 #ifndef SPI_NAND_BBM_DEMO_PBA
-#define SPI_NAND_BBM_DEMO_PBA        1011U
+#define SPI_NAND_BBM_DEMO_PBA        1012U
 #endif
 #ifndef SPI_NAND_BBM_DEMO_EXECUTE
 #define SPI_NAND_BBM_DEMO_EXECUTE    0U     // 1=ON  0=OFF

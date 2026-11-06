@@ -39,6 +39,7 @@ OF SUCH DAMAGE.
 #include "gd5f_spi_nand.h"
 #include "gd5f_spi_nand_cr.h"
 #include "gd5f_spi_nand_full_test.h"
+#include "gd5f_spi_nand_bad_block_test.h"
 #include "gd5f_spi_nand_bbm.h"
 
 /* Reserve this block range for the timing demo; it will be erased and rewritten. */
@@ -46,6 +47,9 @@ OF SUCH DAMAGE.
 #define NAND_TEST_BLOCK_COUNT    5U
 
 #define CR_BUFFER_SIZE           (64U * 1024U)
+#define NAND_BAD_BLOCK_CHECK_ENABLE 1U
+#define NAND_BAD_BLOCK_FIRST_BLOCK  0U
+#define NAND_BAD_BLOCK_COUNT        0U
 #define NAND_BBM_ONLY_TEST       0U
 #define NAND_FULL_TEST_ENABLE    0U
 #define NAND_FULL_TEST_IO_MODE   SPI_NAND_IO_QUAD
@@ -297,6 +301,9 @@ int main(void)
            (unsigned long)(rcu_clock_freq_get(CK_APB2) / 1000000U),
            (unsigned long)(rcu_clock_freq_get(CK_APB2) / spi_nand_sck_divisor() / 1000000U),
            (unsigned long)spi_nand_sck_divisor());
+#if NAND_BAD_BLOCK_CHECK_ENABLE
+    (void)spi_nand_bad_block_scan(nand, NAND_BAD_BLOCK_FIRST_BLOCK, NAND_BAD_BLOCK_COUNT);
+#endif
 #if NAND_BBM_ONLY_TEST
     printf("BBM-only test mode: page and full-chip tests skipped\r\n");
 #else
