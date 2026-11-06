@@ -83,7 +83,7 @@ set(INC_DIRS
 # 可在此追加头文件路径，例如 list(APPEND INC_DIRS ${CMAKE_SOURCE_DIR}/my_inc)
 # ---- [mcudeva:user] END includes ----
 
-# ==== [mcudeva:auto] BEGIN sources (hash:7c9f039e) ====
+# ==== [mcudeva:auto] BEGIN sources (hash:d025ca68) ====
 # 源文件列表
 set(SOURCES)
 file(GLOB_RECURSE SOURCE_GLOB_0 CONFIGURE_DEPENDS
@@ -113,7 +113,7 @@ list(REVERSE SOURCE_GLOB_3)
 list(APPEND SOURCES ${SOURCE_GLOB_3})
 
 file(GLOB_RECURSE SOURCE_GLOB_4 CONFIGURE_DEPENDS
-    "${CMAKE_SOURCE_DIR}/tests/*.c"
+    "${CMAKE_SOURCE_DIR}/host_tests/*.c"
 )
 list(REVERSE SOURCE_GLOB_4)
 list(APPEND SOURCES ${SOURCE_GLOB_4})
