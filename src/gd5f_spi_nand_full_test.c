@@ -1,12 +1,10 @@
 #include "gd5f_spi_nand_full_test.h"
 #include "gd5f_spi_nand_cr.h"
+#include "gd5f_spi_nand_test_config.h"
 #include <stdio.h>
 #include <string.h>
 
-#define PROGRESS_BLOCK_INTERVAL  64U
 #define FULL_TEST_MAX_BLOCKS    4096U
-#define FULL_TEST_CR_BUFFER_SIZE (64U * 1024U)
-#define FULL_TEST_RANDOM_SEED    0xA5C31E27U
 
 typedef enum {
     BLOCK_AVAILABLE = 0U,

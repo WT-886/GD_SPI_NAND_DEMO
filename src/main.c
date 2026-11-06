@@ -41,18 +41,7 @@ OF SUCH DAMAGE.
 #include "gd5f_spi_nand_full_test.h"
 #include "gd5f_spi_nand_bad_block_test.h"
 #include "gd5f_spi_nand_bbm.h"
-
-/* Reserve this block range for the timing demo; it will be erased and rewritten. */
-#define NAND_TEST_BLOCK          1U
-#define NAND_TEST_BLOCK_COUNT    5U
-
-#define CR_BUFFER_SIZE           (64U * 1024U)
-#define NAND_BAD_BLOCK_CHECK_ENABLE 1U
-#define NAND_BAD_BLOCK_FIRST_BLOCK  0U
-#define NAND_BAD_BLOCK_COUNT        0U
-#define NAND_BBM_ONLY_TEST       0U
-#define NAND_FULL_TEST_ENABLE    0U
-#define NAND_FULL_TEST_IO_MODE   SPI_NAND_IO_QUAD
+#include "gd5f_spi_nand_test_config.h"
 
 static uint8_t tx_page[SPI_NAND_MAX_PAGE_SIZE];
 static uint8_t rx_page[SPI_NAND_MAX_PAGE_SIZE];
@@ -304,15 +293,15 @@ int main(void)
 #if NAND_BAD_BLOCK_CHECK_ENABLE
     (void)spi_nand_bad_block_scan(nand, NAND_BAD_BLOCK_FIRST_BLOCK, NAND_BAD_BLOCK_COUNT);
 #endif
-#if NAND_BBM_ONLY_TEST
-    printf("BBM-only test mode: page and full-chip tests skipped\r\n");
-#else
+#if NAND_TIMING_TEST_ENABLE
     nand_demo(nand);
+#endif
 #if NAND_FULL_TEST_ENABLE
     (void)spi_nand_full_random_test(nand, NAND_FULL_TEST_IO_MODE);
 #endif
-#endif
+#if NAND_BBM_DEMO_ENABLE
     spi_nand_bbm_demo();
+#endif
 
     while(1) {
     }

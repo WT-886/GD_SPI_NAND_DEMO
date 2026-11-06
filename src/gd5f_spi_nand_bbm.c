@@ -1,6 +1,7 @@
 #include "gd5f_spi_nand_bbm.h"
 #include "gd5f_spi_nand_internal.h"
 #include "gd5f_spi_nand_cr.h"
+#include "gd5f_spi_nand_test_config.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -8,17 +9,6 @@
 #define CMD_WRITE_BBM                0xA1U
 #define CMD_READ_BBM_LINK_TABLE      0xA5U
 #define BBM_LBA_VALUE_MASK           0x3FFFU
-
-/* v1.0.0 demo: execution is enabled and may consume a persistent BBM link. */
-#ifndef SPI_NAND_BBM_DEMO_LBA
-#define SPI_NAND_BBM_DEMO_LBA        511U
-#endif
-#ifndef SPI_NAND_BBM_DEMO_PBA
-#define SPI_NAND_BBM_DEMO_PBA        1012U
-#endif
-#ifndef SPI_NAND_BBM_DEMO_EXECUTE
-#define SPI_NAND_BBM_DEMO_EXECUTE    0U     // 1=ON  0=OFF
-#endif
 
 static ErrStatus validate_candidate(uint16_t lba, uint16_t pba,
                                     const spi_nand_bbm_link_t *links, uint8_t links_full)
